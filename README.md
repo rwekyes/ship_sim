@@ -2,6 +2,7 @@ ship_sim
 ========
 A multipurpose space ship simulator.  
 Built mainly as a Rust learning project, it is intended to be used to supplement sci-fi TTRPGs.
+Claude Code will be used throughout as a teaching tool, but my intention is to hand type every line, even if I am copying logic, to get more familiar with Rust syntax.
 
 Main Feature Goals
 --------
