@@ -1,3 +1,5 @@
+![CI](https://github.com/rwekyes/ship_sim/actions/workflows/ci.yml/badge.svg)
+
 ship_sim
 ========
 A multipurpose space ship simulator.  
