@@ -1,0 +1,27 @@
+Spaceship Simulator
+Phase 1: Navigation
+    • Solar system map simulated
+    • Customizable systems, switchable by GM – possibly additional db per system
+    • Ship position and orbit parameters tracked, course corrections recompute
+    • 12h or 24h time steps to keep it easy
+    • Parameterizer that can accept acceleration vectors as delta-v or g-force, apply over timesteps limited by engine output/g force or apply continuously
+    • Burn/Float/Brake setters
+    • 2-D along plane of ecliptic for first pass, explore/keep open for 3-D
+    • Planets/stations/ships considered points for the purposes of simulator, main purpose is to plot longer voyages, capture/match vectors within a wide range accepted as valid
+    • Additional ships/stations/minor planets can be added to db, simulator nav can be used to update their orbit
+    • Light delay to ship calculated, possibly stored in db – possibly expand to give current delay between planets
+    • Ship properties defined, including fuel capacity and consumption, leave ship mass/reaction mass for later, maybe even skip if calculations get crazy
+    • CLI nav system with solutions – upgradable to GUI in game – number of saved solutions increases, ability to predict other ship’s vectors improves
+Phase 2: Ship Systems
+    • Fuel, reaction mass, battery capacity/recharge rate, weapons and ammo, life support, cargo manifest, subsystems tracked.
+    • CLI, upgradable to GUI in game (Android app with keyboard?)
+    • GM-creatable failures
+    • UI enables power, fuel, reaction mass transfer, system and subsystem resets, software upgrades/fallbacks
+
+Architecture Thoughts:
+    • Rust backend
+    • Having it run in a browser would be portable and easy
+    • GM mode should include ship and character generators
+    • Solar system editor is going to be the trickiest part
+    • To really pull this off I need to host a server, even if it’s locally. A domain would be best.
+    • Real planet data, even if I have to calculate it myself
