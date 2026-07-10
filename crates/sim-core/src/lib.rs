@@ -1,11 +1,7 @@
-mod orbits;
-mod vectors;
+mod bodies;
 mod burns;
+mod orbits;
 mod ship;
 mod systems;
 mod time;
-mod bodies;
-
-fn main() {
-    println!("Hello, world!");
-}
+mod vectors;
