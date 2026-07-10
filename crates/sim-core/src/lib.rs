@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 mod bodies;
 mod burns;
 mod orbits;
