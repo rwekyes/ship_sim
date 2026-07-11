@@ -6,6 +6,7 @@ allowed to make edits to files directly. The intention is to allow Claude Code
 to assist in diagnosing bugs, answering questions, and giving guidance. 
 Code examples should be kept to a minimum when not asked directly for an 
 implementation.
+This document is to be the one exception to the file edit rule.
 
 ## What this is
 
