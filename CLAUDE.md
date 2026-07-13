@@ -109,14 +109,40 @@ data/*.db), rust-toolchain.toml, CI green, workspace inheritance wired,
 OrbitalElements struct in sim-core/src/orbits.rs (six elements + hifitime
 Epoch, serde derives, doc comments, SI/radians).
 
+`time.rs` — complete with 4 unit tests. `Clock` (named Clock, not SimClock)
+wrapping a private Epoch; `TimeStep` enum extended beyond the planned 12h/24h
+with Round (15s), Minute, Hour for combat pacing; `seconds_since(epoch, t)`
+as a free function; `J2000` as a `pub static LazyLock<Epoch>` — noon **TT**
+(not UTC; the 64 s difference is ~1,900 km of Earth motion, over the error
+budget). LazyLock because hifitime's Epoch constructors aren't const fn.
+A test pins J2000 == 2000-01-01 11:58:55.816 UTC.
+
+`bodies.rs` — μ constants for Sun through Pluto system + Luna, from JPL
+DE440 (ssd.jpl.nasa.gov/astro_par.html), converted to m³/s². Doc comments
+quote JPL's as-published km³/s² values for eyeball provenance. MU_SOL is
+clippy-rounded to 17 sig figs (bit-identical to the full DE440 value).
+Planet values are "system" GMs (include moons). Never compute μ as G·M.
+
+`orbits.rs` — `propagate_mean_anomaly(&OrbitalElements, dt: f64) -> f64` is
+a stub returning 1.0 (unused params still trip clippy; needs `_`-prefixes
+or the real body before CI passes). Design settled: propagation is pure and
+read-only (no &mut — elements are never updated for coasting bodies; wrap
+M into [0, 2π) via rem_euclid before solving). solve_kepler(M, e) →
+Result<E, KeplerError> (thiserror: non-convergence, e ≥ 1 unsupported);
+Newton from E₀ = M, tol ~1e-12 rad, cap ~30 iters. Position entry point
+planned as elements.position_at(mu, dt) returning glam::DVec2.
+
 Next up, in order:
-1. `time.rs` — SimClock, TimeStep enum, J2000 constant, seconds_since().
-2. `orbits.rs` — Kepler solver (M → E, Newton iteration) and E → ν →
-   in-plane position. Test in isolation with textbook values.
-3. `vectors.rs` — state vector ↔ elements conversions. Test as round-trips
+1. `orbits.rs` — implement propagate_mean_anomaly (M₀ + n·dt, n = √(μ/a³) —
+   needs μ param), then solve_kepler (M → E, Newton), then E → ν →
+   in-plane position. Test ladder: solver edge cases (M=0→E=0, e=0→E=M) +
+   round-trip property E − e·sin E == M over an (M, e) grid; then degenerate
+   orbits (e=0 → r=a; M=0 → periapsis at a(1−e)); Horizons last.
+2. `vectors.rs` — state vector ↔ elements conversions. Test as round-trips
    through the solver.
-4. First Horizons known-answer test; then bodies.rs (Sol system hardcoded),
-   then the CLI plot/solve commands.
+3. First Horizons known-answer test (remember ϖ/L → ω/M₀ conversion; strict
+   two-body μ is GM_Sun + GM_planet — ~10⁻³ for Jupiter, noticeable at the
+   1,000 km budget), then the CLI plot/solve commands.
 
 ## Known gotchas from setup (avoid repeats)
 
@@ -129,3 +155,13 @@ Next up, in order:
 - Remote is `origin` on github.com/rwekyes/ship_sim; HTTPS auth via gh is
   the working path (SSH key exists but agent setup is unfinished).
 - Branch is `master`.
+- hifitime: `to_utc(Unit)` returns a raw f64 count since the 1900 reference,
+  NOT a UTC Epoch — use `to_time_scale(TimeScale::UTC)`. Epoch's PartialEq
+  compares the instant across time scales, so prefer comparing Epochs over
+  Display strings in tests.
+- Float division never panics in Rust — bad μ or a yields inf/NaN that
+  propagates silently. Validate data at the load boundary (parse, don't
+  validate); math fns trust inputs, debug_assert! as tripwire.
+- Don't restate a constant's value in its doc comment — the copies drift
+  (happened day one in bodies.rs). Docs carry provenance/units/what the
+  code can't say; quote source-published values (km³/s²), not converted.
