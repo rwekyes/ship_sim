@@ -44,7 +44,7 @@ pub fn propagate_mean_anomaly(elements: &OrbitalElements, mu: f64, dt: f64) -> f
 /// Kepler solver
 ///
 /// Solves M = E - e*sin(E) for the eccentric anomaly
-/// Inputs in radians, ma is assumed to be wrapped in [0,2π]
+/// Inputs in radians, ma is assumed to be wrapped in [0,2π)
 /// after calculating with propagate_mean_anomaly
 pub fn solve_kepler(ma: f64, ecc: f64) -> Result<f64, KeplerError> {
     if ecc >= 1.0 {
@@ -70,4 +70,38 @@ pub fn solve_kepler(ma: f64, ecc: f64) -> Result<f64, KeplerError> {
         mean_anomaly: ma,
         eccentricity: ecc,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_solve_kepler_zero_ma() {
+        assert_eq!(solve_kepler(0.0, 0.5).unwrap(), 0.0);
+    }
+
+    #[test]
+    fn test_solve_kepler_zero_ecc() {
+        assert_eq!(solve_kepler(0.5, 0.0).unwrap(), 0.5);
+    }
+
+    #[test]
+    fn test_solve_kepler_pairs_to_tolerance() {
+        for i in 0..43 {
+            let ma = i as f64 / 43.0;
+            for j in 0..13 {
+                let ecc = j as f64 / 13.0;
+                let big_e = solve_kepler(ma, ecc).unwrap();
+                let residual = (big_e - (ecc * big_e.sin()) - ma).abs();
+                assert!(
+                    residual <= 1e-12,
+                    "residual {} is too big for M={}, e={}",
+                    residual,
+                    ma,
+                    ecc
+                );
+            }
+        }
+    }
 }
