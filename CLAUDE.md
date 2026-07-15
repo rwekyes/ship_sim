@@ -121,7 +121,10 @@ A test pins J2000 == 2000-01-01 11:58:55.816 UTC.
 DE440 (ssd.jpl.nasa.gov/astro_par.html), converted to m³/s². Doc comments
 quote JPL's as-published km³/s² values for eyeball provenance. MU_SOL is
 clippy-rounded to 17 sig figs (bit-identical to the full DE440 value).
-Planet values are "system" GMs (include moons). Never compute μ as G·M.
+Planet values are "system" GMs (include moons) EXCEPT Earth: JPL lists
+GM_Earth and GM_Moon separately, so MU_EARTH is Earth alone. Two-body μ
+for the Earth-Moon barycenter = MU_SOL + MU_EARTH + MU_LUNA. Never
+compute μ as G·M.
 
 `orbits.rs` — `propagate_mean_anomaly(&OrbitalElements, dt: f64) -> f64` is
 a stub returning 1.0 (unused params still trip clippy; needs `_`-prefixes

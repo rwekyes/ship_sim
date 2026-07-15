@@ -1,0 +1,131 @@
+*******************************************************************************
+Revised: April 12, 2021         Earth Barycenter                              3
+
+ Dynamical point:
+ ---------------
+ The common point about which the Earth and Moon revolve (center of mass). This
+ is approximately 4671 km from the center of the Earth, or about 3/4 of the way
+ to the surface. See 399 for Earth center, or 301 for Moon center ephemeris.
+*******************************************************************************
+
+
+*******************************************************************************
+Ephemeris / WWW_USER Tue Jul 14 22:07:08 2026 Pasadena, USA      / Horizons
+*******************************************************************************
+Target body name: Earth-Moon Barycenter (3)       {source: DE441}
+Center body name: Sun (10)                        {source: DE441}
+Center-site name: BODY CENTER
+*******************************************************************************
+Start time      : A.D. 2000-Jan-01 12:00:00.0000 TDB
+Stop  time      : A.D. 2000-Dec-31 18:00:00.0000 TDB
+Step-size       : 175320 minutes
+*******************************************************************************
+Center geodetic : 0.0, 0.0, 0.0                   {E-lon(deg),Lat(deg),Alt(km)}
+Center cylindric: 0.0, 0.0, 0.0                   {E-lon(deg),Dxy(km),Dz(km)}
+Center radii    : 695700.0, 695700.0, 695700.0 km {Equator_a, b, pole_c}
+Keplerian GM    : 1.3271284354451501E+11 km^3/s^2
+Output units    : KM-S, deg, Julian Day Number (Tp)
+Calendar mode   : Mixed Julian/Gregorian
+Output type     : GEOMETRIC osculating elements
+Output format   : 10
+Reference frame : Ecliptic of J2000.0
+*******************************************************************************
+JDTDB
+   EC    QR   IN
+   OM    W    Tp
+   N     MA   TA
+   A     AD   PR
+*******************************************************************************
+$$SOE
+2451545.000000000 = A.D. 2000-Jan-01 12:00:00.0000 TDB
+ EC= 1.670236222428361E-02 QR= 1.470987073259446E+08 IN= 1.034624342994112E-04
+ OM= 1.402921798841513E+02 W = 3.226257524989104E+02 Tp=  2451547.490625193808
+ N = 1.140757464085235E-05 MA= 3.575452038219296E+02 TA= 3.574614823165164E+02
+ A = 1.495973362233347E+08 AD= 1.520959651207248E+08 PR= 3.155797891611266E+07
+2451666.750000000 = A.D. 2000-May-02 06:00:00.0000 TDB
+ EC= 1.670727818771489E-02 QR= 1.470989111751556E+08 IN= 1.240375094930657E-04
+ OM= 1.539725302794792E+02 W = 3.090059253813745E+02 Tp=  2451547.551136725582
+ N = 1.140746538059548E-05 MA= 1.174829966966139E+02 TA= 1.191649923914736E+02
+ A = 1.495982914467635E+08 AD= 1.520976717183714E+08 PR= 3.155828117719939E+07
+2451788.500000000 = A.D. 2000-Sep-01 00:00:00.0000 TDB
+ EC= 1.673541851076160E-02 QR= 1.470918212305071E+08 IN= 1.328247466279000E-04
+ OM= 1.614482043208027E+02 W = 3.015580190323655E+02 Tp=  2451912.833140385337
+ N = 1.140780043607558E-05 MA= 2.374530347715744E+02 TA= 2.358546821615908E+02
+ A = 1.495953622246048E+08 AD= 1.520989032187025E+08 PR= 3.155735428729539E+07
+2451910.250000000 = A.D. 2000-Dec-31 18:00:00.0000 TDB
+ EC= 1.672419634575637E-02 QR= 1.470982977905351E+08 IN= 1.472004609635195E-04
+ OM= 1.712618004770826E+02 W = 2.915746035721716E+02 Tp=  2451912.667500546202
+ N = 1.140724232329146E-05 MA= 3.576173459429680E+02 TA= 3.575359748386228E+02
+ A = 1.496002416045014E+08 AD= 1.521021854184677E+08 PR= 3.155889826807196E+07
+$$EOE
+*******************************************************************************
+
+TIME
+
+  Barycentric Dynamical Time ("TDB" or T_eph) output was requested. This
+continuous coordinate time is equivalent to the relativistic proper time
+of a clock at rest in a reference frame co-moving with the solar system
+barycenter but outside the system's gravity well. It is the independent
+variable in the solar system relativistic equations of motion.
+
+  TDB runs at a uniform rate of one SI second per second and is independent
+of irregularities in Earth's rotation.
+
+CALENDAR SYSTEM
+
+  Mixed calendar mode was active such that calendar dates after AD 1582-Oct-15
+(if any) are in the modern Gregorian system. Dates prior to 1582-Oct-5 (if any)
+are in the Julian calendar system, which is automatically extended for dates
+prior to its adoption on 45-Jan-1 BC.  The Julian calendar is useful for
+matching historical dates. The Gregorian calendar more accurately corresponds
+to the Earth's orbital motion and seasons. A "Gregorian-only" calendar mode is
+available if such physical events are the primary interest.
+
+REFERENCE FRAME AND COORDINATES
+
+  Ecliptic at the standard reference epoch
+
+    Reference epoch: J2000.0
+    X-Y plane: adopted Earth orbital plane at the reference epoch
+               Note: IAU76 obliquity of 84381.448 arcseconds wrt ICRF X-Y plane
+    X-axis   : ICRF
+    Z-axis   : perpendicular to the X-Y plane in the directional (+ or -) sense
+               of Earth's north pole at the reference epoch.
+
+  Symbol meaning:
+
+    JDTDB    Julian Day Number, Barycentric Dynamical Time
+      EC     Eccentricity, e
+      QR     Periapsis distance, q (km)
+      IN     Inclination w.r.t X-Y plane, i (degrees)
+      OM     Longitude of Ascending Node, OMEGA, (degrees)
+      W      Argument of Perifocus, w (degrees)
+      Tp     Time of periapsis (Julian Day Number)
+      N      Mean motion, n (degrees/sec)
+      MA     Mean anomaly, M (degrees)
+      TA     True anomaly, nu (degrees)
+      A      Semi-major axis, a (km)
+      AD     Apoapsis distance (km)
+      PR     Sidereal orbit period (sec)
+
+ABERRATIONS AND CORRECTIONS
+
+ Geometric osculating elements have NO corrections or aberrations applied.
+
+Computations by ...
+
+    Solar System Dynamics Group, Horizons On-Line Ephemeris System
+    4800 Oak Grove Drive, Jet Propulsion Laboratory
+    Pasadena, CA  91109   USA
+
+    General site: https://ssd.jpl.nasa.gov/
+    Mailing list: https://ssd.jpl.nasa.gov/email_list.html
+    System news : https://ssd.jpl.nasa.gov/horizons/news.html
+    User Guide  : https://ssd.jpl.nasa.gov/horizons/manual.html
+    Connect     : browser        https://ssd.jpl.nasa.gov/horizons/app.html#/x
+                  API            https://ssd-api.jpl.nasa.gov/doc/horizons.html
+                  command-line   telnet ssd.jpl.nasa.gov 6775
+                  e-mail/batch   https://ssd.jpl.nasa.gov/ftp/ssd/horizons_batch.txt
+                  scripts        https://ssd.jpl.nasa.gov/ftp/ssd/SCRIPTS
+    Inquiries   : Jon.D.Giorgini@jpl.nasa.gov
+*******************************************************************************
