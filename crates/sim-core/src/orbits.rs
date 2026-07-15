@@ -1,3 +1,4 @@
+use glam::DVec2;
 use hifitime::Epoch;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::TAU;
@@ -72,9 +73,18 @@ pub fn solve_kepler(ma: f64, ecc: f64) -> Result<f64, KeplerError> {
     })
 }
 
+/// Computes heliocentric position
+/// ecc_anomaly is radians from solve_kepler, returns DVec2 in meters in heliocentric frame
+pub fn position_at(elements: &OrbitalElements, ecc_anomaly: f64) -> DVec2 {
+    DVec2::from_angle(elements.arg_periapsis).rotate(DVec2::new(
+        elements.semi_major_axis * (ecc_anomaly.cos() - elements.eccentricity),
+        elements.semi_major_axis * (1.0 - elements.eccentricity.powi(2)).sqrt() * ecc_anomaly.sin(),
+    ))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time::J2000;
 
     #[test]
     fn test_solve_kepler_zero_ma() {
@@ -89,7 +99,7 @@ mod tests {
     #[test]
     fn test_solve_kepler_pairs_to_tolerance() {
         for i in 0..43 {
-            let ma = i as f64 / 43.0;
+            let ma = (i as f64 / 43.0) * TAU;
             for j in 0..13 {
                 let ecc = j as f64 / 13.0;
                 let big_e = solve_kepler(ma, ecc).unwrap();
@@ -102,6 +112,61 @@ mod tests {
                     ecc
                 );
             }
+        }
+    }
+    #[test]
+    fn test_position_at_circle() {
+        // Circular orbit, 1 AU, non-zero omega
+        let elements = create_test_elements(149_597_870_691.0, 0.0, 0.333);
+        for i in 0..23 {
+            let ma = (i as f64 / 23.0) * TAU;
+            let big_e = solve_kepler(ma, elements.eccentricity).unwrap();
+            let position = position_at(&elements, big_e);
+            let residual = (position.length() - elements.semi_major_axis).abs();
+            assert!(
+                residual <= 1.0,
+                "on iteration {}, residual {} is larger than 1m",
+                i,
+                residual
+            );
+            let position2 =
+                elements.semi_major_axis * DVec2::from_angle(elements.arg_periapsis + big_e);
+            assert!(
+                position.distance(position2) <= 1.0,
+                "on iteration {}, vector {} is not within 1 m of vector {}",
+                i,
+                position,
+                position2
+            )
+        }
+    }
+
+    fn test_position_at_periapsis() {
+        let elements = create_test_elements(149_597_870_691.0, 0.3, 0.333);
+        let position = position_at(&elements, 0.0);
+        assert!((position.length() - 149_597_870_691.0 * (1.0 - 0.3)).abs() <= 1.0);
+    }
+
+    fn test_position_at_apoapsis() {
+        use std::f64::consts::PI;
+        let elements = create_test_elements(149_597_870_691.0, 0.3, 0.333);
+        let position = position_at(&elements, PI);
+        assert!((position.length() - 149_597_870_691.0 * (1.0 + 0.3)).abs() <= 1.0);
+    }
+
+    fn create_test_elements(
+        semi_major_axis: f64,
+        eccentricity: f64,
+        arg_periapsis: f64,
+    ) -> OrbitalElements {
+        OrbitalElements {
+            semi_major_axis,
+            eccentricity,
+            inclination: 0.0,
+            ascending_node: 0.0,
+            arg_periapsis,
+            mean_anomaly_epoch: 0.0,
+            epoch: *J2000,
         }
     }
 }
