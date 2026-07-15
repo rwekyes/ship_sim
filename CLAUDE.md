@@ -126,28 +126,45 @@ GM_Earth and GM_Moon separately, so MU_EARTH is Earth alone. Two-body μ
 for the Earth-Moon barycenter = MU_SOL + MU_EARTH + MU_LUNA. Never
 compute μ as G·M.
 
-`orbits.rs` — `propagate_mean_anomaly(&OrbitalElements, dt: f64) -> f64` is
-a stub returning 1.0 (unused params still trip clippy; needs `_`-prefixes
-or the real body before CI passes). Design settled: propagation is pure and
-read-only (no &mut — elements are never updated for coasting bodies; wrap
-M into [0, 2π) via rem_euclid before solving). solve_kepler(M, e) →
-Result<E, KeplerError> (thiserror: non-convergence, e ≥ 1 unsupported);
-Newton from E₀ = M, tol ~1e-12 rad, cap ~30 iters. Position entry point
-planned as elements.position_at(mu, dt) returning glam::DVec2.
+`orbits.rs` — COMPLETE for coasting bodies, validated against JPL. Three
+pure free functions, each taking `&OrbitalElements` where relevant:
+- `propagate_mean_anomaly(&elements, mu, dt) -> f64` — M₀ + n·dt,
+  rem_euclid into [0, 2π). dt is seconds since elements.epoch.
+- `solve_kepler(ma, ecc) -> Result<f64, KeplerError>` — Newton from E₀=M,
+  tol 1e-12 on the step, 30-iter cap. thiserror variants NotElliptical /
+  NotConverged carry the offending inputs.
+- `position_at(&elements, ecc_anomaly) -> DVec2` — meters, heliocentric
+  ecliptic. Uses the direct perifocal form x′ = a(cos E − e),
+  y′ = a√(1−e²)·sin E (no true anomaly needed for position), rotated by
+  `DVec2::from_angle(ω).rotate(..)`.
+The planned `elements.position_at(mu, dt)` convenience method chaining all
+three is NOT yet written. 7 unit tests: solver edge cases, (M, e) grid
+round-trip (prime step counts, deliberately), circle/periapsis/apoapsis
+degenerate orbits, Horizons known-answer.
+
+Horizons test (`test_earth_coasting_to_jpl_data_2d`): EMB relative to Sun
+body center, DE441, JD 2451545.0 + {0, 121.75, 243.5, 365.25} days.
+Observed misses: 0.15 m at dt=0 (transcription exact), growing to
+~3,300–7,700 km across the year — the measured cost of the two-body
+assumption (exceeds the 1,000 km budget within a year; accepted for
+gameplay). Assert tolerance 1e7 m with that headroom. Horizons' printed
+"Keplerian GM" matched MU_SOL + MU_EARTH + MU_LUNA to every digit. EMB z
+stayed within ~360 km of the ecliptic all year — empirical license for 2D.
 
 Next up, in order:
-1. `orbits.rs` — implement propagate_mean_anomaly (M₀ + n·dt, n = √(μ/a³) —
-   needs μ param), then solve_kepler (M → E, Newton), then E → ν →
-   in-plane position. Test ladder: solver edge cases (M=0→E=0, e=0→E=M) +
-   round-trip property E − e·sin E == M over an (M, e) grid; then degenerate
-   orbits (e=0 → r=a; M=0 → periapsis at a(1−e)); Horizons last.
+1. Commit the raw Horizons outputs to `crates/sim-core/testdata/`
+   (horizons_emb_elements.txt, horizons_emb_vectors.txt) — the test's
+   provenance comment already cites them, but they only exist in a
+   scratch file so far. Receipt convention: raw dump committed verbatim,
+   short query-fingerprint comment above the test, record the observed
+   miss that justified the tolerance.
 2. `vectors.rs` — state vector ↔ elements conversions. Test as round-trips
-   through the solver.
-3. First Horizons known-answer test (remember ϖ/L → ω/M₀ conversion; strict
-   two-body μ is GM_Sun + GM_planet — ~10⁻³ for Jupiter, noticeable at the
-   1,000 km budget), then the CLI plot/solve commands.
+   through the solver, plus the J2000-epoch Horizons vector row (already
+   in testdata) as a known answer.
+3. Convenience entry point chaining propagate → solve → position, then
+   the CLI plot/solve commands.
 
-## Known gotchas from setup (avoid repeats)
+## Known gotchas (avoid repeats)
 
 - `cargo new` inside the workspace runs its own `git init` if invoked before
   the root repo exists, and stamps literal `edition = "2024"`. Use
@@ -168,3 +185,32 @@ Next up, in order:
 - Don't restate a constant's value in its doc comment — the copies drift
   (happened day one in bodies.rs). Docs carry provenance/units/what the
   code can't say; quote source-published values (km³/s²), not converted.
+- hifitime::J2000_REF_EPOCH is noon **TAI**, not TT — 32.184 s (~950 km of
+  Earth motion) off the project's J2000. Always use crate::time::J2000
+  (bitten once: imported into a test before catching it).
+- glam: Vec2/Mat2 are f32; the f64 types are DVec2/DMat2. Bare Vec2 must
+  never appear in sim-core, and it's what autocomplete offers first.
+- Test inputs with accidental structure hide bugs (bitten twice): (M, e)
+  pairs with M == e can't catch swapped arguments, and dt ≈ one orbital
+  period can't catch a no-op propagation. Use distinct values, awkward
+  mid-orbit epochs, prime step counts in grids.
+- A test fn without #[test] silently never runs (bitten once — two tests
+  were inert while "passing"): read the by-name list in the runner output
+  after adding tests. cargo test also captures stdout of passing tests —
+  `cargo test -- --nocapture` (or --show-output) to see println!.
+- Exact float == in tests only survives identical arithmetic routes; any
+  comparison between different-but-equivalent computations (trig
+  identities, rotations) needs a tolerance scaled to magnitude — f64 has
+  ~16 significant digits, not decimal places, so 1e-12 absolute is
+  meaningless at AU scale (~1 m is nine orders inside budget).
+- JPL Horizons: tables are timestamped TDB (≈TT, sub-ms — ignorable,
+  unlike TAI). Time-span fields accept Julian dates — use JD arithmetic,
+  never calendar math (2000 was a leap year; 365.25 d after J2000 is
+  2000-Dec-31 18:00, bitten once). Target "Earth" resolves to 399 — EMB
+  is body "3". Center must be Sun body center (500@10), NOT the default
+  solar-system barycenter @0 (~1.5M km apart, Jupiter's doing). Horizons
+  ELEMENTS output gives W, OM, MA directly — the ϖ/L → ω/M₀ conversion
+  only applies to the "Approximate Positions" table, not Horizons.
+- Angles in OrbitalElements only feed sin/cos, so out-of-[0, 2π) values
+  work, but keep them canonical on construction (rem_euclid) so tests and
+  eyeballs agree.
