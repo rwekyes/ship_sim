@@ -151,17 +151,24 @@ gameplay). Assert tolerance 1e7 m with that headroom. Horizons' printed
 "Keplerian GM" matched MU_SOL + MU_EARTH + MU_LUNA to every digit. EMB z
 stayed within ~360 km of the ecliptic all year — empirical license for 2D.
 
+Raw Horizons outputs ARE committed, at `crates/sim-core/test_data/`
+(horizons_emb_elements.txt, horizons_emb_vectors.txt) — note the
+underscore; the provenance comment in orbits.rs says `testdata/` and
+should be fixed to match. Receipt convention: raw dump committed
+verbatim, short query-fingerprint comment above the test, record the
+observed miss that justified the tolerance.
+
+`vectors.rs` — IN PROGRESS. StateVector struct (position/velocity DVec2
+pair), `elements_to_state_vector` and `velocity_at` free functions
+drafted; no tests yet. Still to come: state vector → elements inverse
+(vis-viva for a, eccentricity vector, ν → E → M₀; must decide error
+type, retrograde handling, e≈0 convention). Test as round-trips through
+the solver, plus the J2000-epoch Horizons vector row (already in
+test_data) as a known answer.
+
 Next up, in order:
-1. Commit the raw Horizons outputs to `crates/sim-core/testdata/`
-   (horizons_emb_elements.txt, horizons_emb_vectors.txt) — the test's
-   provenance comment already cites them, but they only exist in a
-   scratch file so far. Receipt convention: raw dump committed verbatim,
-   short query-fingerprint comment above the test, record the observed
-   miss that justified the tolerance.
-2. `vectors.rs` — state vector ↔ elements conversions. Test as round-trips
-   through the solver, plus the J2000-epoch Horizons vector row (already
-   in testdata) as a known answer.
-3. Convenience entry point chaining propagate → solve → position, then
+1. Finish `vectors.rs` per above.
+2. Convenience entry point chaining propagate → solve → position, then
    the CLI plot/solve commands.
 
 ## Known gotchas (avoid repeats)

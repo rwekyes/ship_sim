@@ -158,7 +158,7 @@ mod tests {
     // Target: Earth-Moon Barycenter (3), center: Sun body center (500@10),
     // frame: Ecliptic of J2000.0, units KM-S/deg.
     // Span JD 2451545.0..2451910.25 (J2000 + 365.25 d), step 175,320 min.
-    // Raw output: testdata/horizons_emb_elements.txt, horizons_emb_vectors.txt.
+    // Raw output: test_data/horizons_emb_elements.txt, horizons_emb_vectors.txt.
     // Horizons' "Keplerian GM" = 1.3271284354451501e11 km³/s²,
     //   == MU_SOL + MU_EARTH + MU_LUNA (validates bodies.rs sum).
     // Observed miss vs DE441: 0.15 m at dt=0; ~3,300–7,700 km over the year
