@@ -175,10 +175,10 @@ mod tests {
             epoch: *J2000,
         };
         let expected = [
-            DVec2::new(-2.650257688971310e7f64, 1.446939556279910e8f64) * 1e3,
+            DVec2::new(-2.65025768897131e7f64, 1.44693955627991e8f64) * 1e3,
             DVec2::new(-1.118015459197586e8, -1.011745526923638e8) * 1e3,
             DVec2::new(1.408123843059221e8, -5.444539204997468e7) * 1e3,
-            DVec2::new(-2.648471064379870e7, 1.446966741010790e8) * 1e3,
+            DVec2::new(-2.64847106437987e7, 1.44696674101079e8) * 1e3,
         ];
         for (i, exp) in expected.into_iter().enumerate() {
             let ma = propagate_mean_anomaly(
