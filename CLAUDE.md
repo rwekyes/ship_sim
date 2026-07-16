@@ -66,6 +66,19 @@ cargo member unless WASM.
 - **μ (gravitational parameter) belongs to the central body** (bodies.rs),
   not to OrbitalElements. Propagation fns take both.
 - Light delay: computed on demand from positions, never stored.
+- **Coasting state is a `Trajectory` enum** (vectors.rs), built by
+  `Trajectory::from_state(&StateVector, mu, epoch)`: Elliptic(OrbitalElements),
+  Retrograde(OrbitalElements), Escape(StateVector), PureRadial(StateVector).
+  Not a Result — every physical outcome is a variant; escape/radial are
+  valid answers, not errors. Retrograde and PureRadial are canon-motivated:
+  ring gates are fixed relative to the star, so a ship can exit one with
+  zero or reversed angular momentum. Escape/PureRadial carry the raw state
+  vector (lossless; propagate numerically until hyperbolic/rectilinear
+  Kepler exists). Classification order: |h|/(|r||v|) below tolerance →
+  PureRadial; ε ≥ 0 → Escape (covers retrograde escapes); sign of h splits
+  Retrograde/Elliptic. Policy on variants (messaging, propagation strategy)
+  lives in CLI/server, never sim-core. Matches must be exhaustive — no `_`
+  arms, no #[non_exhaustive]; compiler-driven refactor is the upgrade path.
 - Target accuracy: ~1,000 km error bars. Error budget is dominated by source
   element quality and the two-body assumption, not numerics.
 
@@ -159,12 +172,20 @@ verbatim, short query-fingerprint comment above the test, record the
 observed miss that justified the tolerance.
 
 `vectors.rs` — IN PROGRESS. StateVector struct (position/velocity DVec2
-pair), `elements_to_state_vector` and `velocity_at` free functions
-drafted; no tests yet. Still to come: state vector → elements inverse
-(vis-viva for a, eccentricity vector, ν → E → M₀; must decide error
-type, retrograde handling, e≈0 convention). Test as round-trips through
-the solver, plus the J2000-epoch Horizons vector row (already in
-test_data) as a known answer.
+pair, derives done), `elements_to_state_vector` and `velocity_at` free
+functions written; no tests yet. Trajectory enum shape settled (see
+domain decisions). Open sub-decisions: (a) Escape/PureRadial variants
+lose the epoch — struct-style variants carrying Epoch vs. epoch field on
+StateVector (leaning struct variants, keeps StateVector integrator-pure);
+(b) retrograde convention — variant-as-flag with prograde-shaped elements
+vs. i = π in the elements; ONE source of truth, doc-comment it (leaning
+variant-as-flag); (c) e≈0: ω is numerical noise, convention ω = 0,
+round-trip tests must compare positions or ω+M jointly, not ω alone.
+Still to come: `Trajectory::from_state` (vis-viva for a, eccentricity
+vector, ν → E → M₀), serde derives on StateVector/Trajectory. Test as
+round-trips through the solver, plus the J2000-epoch Horizons vector row
+(in test_data) as a known answer; matches! for classification, let-else
+for payload extraction.
 
 Next up, in order:
 1. Finish `vectors.rs` per above.
