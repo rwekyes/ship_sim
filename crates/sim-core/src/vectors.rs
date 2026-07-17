@@ -33,8 +33,8 @@ pub fn velocity_at(elements: &OrbitalElements, mu: f64, ecc_anomaly: f64) -> DVe
     let r = elements.semi_major_axis * (1.0 - (elements.eccentricity * ecc_anomaly.cos()));
     let n = (mu / elements.semi_major_axis.powi(3)).sqrt();
     let mag = elements.semi_major_axis.powi(2);
-    let f = 1.0 - elements.eccentricity.powi(2).sqrt();
+    let ratio = (1.0 - elements.eccentricity.powi(2)).sqrt();
     let x_prime = -(n * mag / r) * ecc_anomaly.sin();
-    let y_prime = (n * mag / r) - f * ecc_anomaly.cos();
+    let y_prime = (n * mag / r) * ratio * ecc_anomaly.cos();
     DVec2::from_angle(elements.arg_periapsis).rotate(DVec2::new(x_prime, y_prime))
 }

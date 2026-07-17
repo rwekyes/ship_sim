@@ -58,8 +58,13 @@ cargo member unless WASM.
 - **Expanse travel = brachistochrone burns** (accelerate, flip, decelerate).
   At sustained ~0.3g, solar gravity is negligible for powered legs — the burn
   solver can be pure kinematics; orbital mechanics applies to coasting.
-- **2D in the ecliptic plane first** (i=0, fold Ω into ω), but the struct
-  stores all six elements so 3D stays open.
+- **Full 3D** (decided 2026-07-15, branch adventure-to-the-third-dimension;
+  supersedes "2D first"). The 2D fold (i=0, Ω into ω) cost more than it
+  saved — retrograde/inclination questions kept leaking in. DVec3
+  throughout; perifocal → ecliptic via ZXZ rotation Rz(Ω)·Rx(i)·Rz(ω),
+  factored into ONE shared helper used by both position and velocity.
+  i is a polar angle, canonical range [0, π] — rem_euclid(TAU) is wrong
+  for it (fine for Ω/ω/M).
 - Element data source: JPL "Approximate Positions of the Planets" /
   JPL Horizons. Note JPL publishes ϖ (longitude of perihelion) and L (mean
   longitude); convert: ω = ϖ − Ω, M₀ = L − ϖ.
@@ -68,17 +73,20 @@ cargo member unless WASM.
 - Light delay: computed on demand from positions, never stored.
 - **Coasting state is a `Trajectory` enum** (vectors.rs), built by
   `Trajectory::from_state(&StateVector, mu, epoch)`: Elliptic(OrbitalElements),
-  Retrograde(OrbitalElements), Escape(StateVector), PureRadial(StateVector).
-  Not a Result — every physical outcome is a variant; escape/radial are
-  valid answers, not errors. Retrograde and PureRadial are canon-motivated:
-  ring gates are fixed relative to the star, so a ship can exit one with
-  zero or reversed angular momentum. Escape/PureRadial carry the raw state
-  vector (lossless; propagate numerically until hyperbolic/rectilinear
-  Kepler exists). Classification order: |h|/(|r||v|) below tolerance →
-  PureRadial; ε ≥ 0 → Escape (covers retrograde escapes); sign of h splits
-  Retrograde/Elliptic. Policy on variants (messaging, propagation strategy)
-  lives in CLI/server, never sim-core. Matches must be exhaustive — no `_`
-  arms, no #[non_exhaustive]; compiler-driven refactor is the upgrade path.
+  Escape(StateVector, Epoch), PureRadial(StateVector, Epoch). Not a
+  Result — every physical outcome is a variant; escape/radial are valid
+  answers, not errors. PureRadial is canon-motivated: ring gates are
+  fixed relative to the star, so a ship can exit one with zero angular
+  momentum. (A Retrograde variant existed briefly in 2D; in 3D retrograde
+  is just i > π/2 inside the elements — deleted, don't reintroduce.)
+  Escape/PureRadial carry the raw state vector + its Epoch (lossless;
+  propagate numerically until hyperbolic/rectilinear Kepler exists).
+  Classification order: |h|/(|r||v|) below tolerance → PureRadial
+  (h = r.cross(v), test is sin of angle between r and v, scale-free);
+  ε ≥ 0 → Escape; else Elliptic. Policy on variants (messaging,
+  propagation strategy) lives in CLI/server, never sim-core. Matches must
+  be exhaustive — no `_` arms, no #[non_exhaustive]; compiler-driven
+  refactor is the upgrade path.
 - Target accuracy: ~1,000 km error bars. Error budget is dominated by source
   element quality and the two-body assumption, not numerics.
 
@@ -171,21 +179,35 @@ should be fixed to match. Receipt convention: raw dump committed
 verbatim, short query-fingerprint comment above the test, record the
 observed miss that justified the tolerance.
 
-`vectors.rs` — IN PROGRESS. StateVector struct (position/velocity DVec2
-pair, derives done), `elements_to_state_vector` and `velocity_at` free
-functions written; no tests yet. Trajectory enum shape settled (see
-domain decisions). Open sub-decisions: (a) Escape/PureRadial variants
-lose the epoch — struct-style variants carrying Epoch vs. epoch field on
-StateVector (leaning struct variants, keeps StateVector integrator-pure);
-(b) retrograde convention — variant-as-flag with prograde-shaped elements
-vs. i = π in the elements; ONE source of truth, doc-comment it (leaning
-variant-as-flag); (c) e≈0: ω is numerical noise, convention ω = 0,
-round-trip tests must compare positions or ω+M jointly, not ω alone.
-Still to come: `Trajectory::from_state` (vis-viva for a, eccentricity
-vector, ν → E → M₀), serde derives on StateVector/Trajectory. Test as
-round-trips through the solver, plus the J2000-epoch Horizons vector row
-(in test_data) as a known answer; matches! for classification, let-else
-for payload extraction.
+`vectors.rs` — IN PROGRESS, mid-3D-migration. StateVector
+(position/velocity, derives + serde done), Trajectory enum committed
+(epoch settled: tuple payloads `(StateVector, Epoch)`; Retrograde variant
+present but slated for deletion — see domain decisions),
+`elements_to_state_vector` and `velocity_at` written; no tests yet.
+KNOWN BUG in velocity_at y_prime (twice-flagged, still unfixed as of
+2026-07-16): `1.0 - e.powi(2).sqrt()` is 1−e not √(1−e²) (parens must
+close before .sqrt()), and the term is SUBTRACTED where the formula
+multiplies. Correct: ẏ′ = (n·a²/r)·√(1−e²)·cos E. Fix before migrating.
+
+3D migration checklist (branch adventure-to-the-third-dimension):
+DVec2 lives only in orbits.rs + vectors.rs. (1) shared
+perifocal → ecliptic DMat3 helper (glam a*b applies b first — Rz(Ω) *
+Rx(i) * Rz(ω) is correct, ω first); (2) position_at/velocity_at return
+DVec3 (z′=0 before rotation); (3) StateVector fields DVec3; (4) delete
+Trajectory::Retrograde, h = r.cross(v); (5) EMB Horizons test: stop
+folding W+OM, feed IN/OM/W as published, expected vectors gain z column
+from horizons_emb_vectors.txt (test_data files are already 3D — columns
+were being discarded); (6) test_position_at_circle alt-route check
+(from_angle(ω+E)) only valid in-plane, rework; (7) NEW inclined-body
+known answer required — EMB i ≈ 0.0004° exercises none of the i/Ω code
+(Mercury i≈7° natural pick, same receipt convention); grids need
+mutually distinct nonzero i/Ω/ω. Then: `Trajectory::from_state` in full
+3D (h, node vector ẑ×h → Ω, i = acos(h_z/|h|), e vector, ω from node
+with quadrant from e_z; singularities: i≈0 → Ω undefined [the old 2D
+world is now the degenerate case], e≈0 → ω undefined, both at once).
+e≈0 convention: ω = 0; round-trip tests compare positions or ω+M
+jointly, not ω alone. Test known answer: J2000-epoch Horizons vector
+row; matches! for classification, let-else for payload extraction.
 
 Next up, in order:
 1. Finish `vectors.rs` per above.
@@ -216,8 +238,13 @@ Next up, in order:
 - hifitime::J2000_REF_EPOCH is noon **TAI**, not TT — 32.184 s (~950 km of
   Earth motion) off the project's J2000. Always use crate::time::J2000
   (bitten once: imported into a test before catching it).
-- glam: Vec2/Mat2 are f32; the f64 types are DVec2/DMat2. Bare Vec2 must
-  never appear in sim-core, and it's what autocomplete offers first.
+- glam: Vec2/Vec3/Mat2/Mat3/Quat are all f32; the f64 types are the
+  D-prefixed ones (DVec3/DMat3/DQuat). Bare f32 types must never appear
+  in sim-core, and they're what autocomplete offers first.
+- A rotation-order bug in the ZXZ perifocal→ecliptic transform is
+  invisible to every zero-inclination test. Only an inclined-body known
+  answer catches Rz/Rx composed backwards. glam composes right-to-left
+  (a * b applies b first).
 - Test inputs with accidental structure hide bugs (bitten twice): (M, e)
   pairs with M == e can't catch swapped arguments, and dt ≈ one orbital
   period can't catch a no-op propagation. Use distinct values, awkward
