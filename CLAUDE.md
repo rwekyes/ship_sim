@@ -123,7 +123,7 @@ cargo member unless WASM.
 `cargo test --workspace`. Warnings are errors in CI. rust-toolchain.toml
 pins stable + components.
 
-## Current state (as of this briefing)
+## Current state (as of 2026-07-17)
 
 Done: workspace scaffold, README, MIT license, .gitignore (/target, .idea/,
 data/*.db), rust-toolchain.toml, CI green, workspace inheritance wired,
@@ -147,72 +147,106 @@ GM_Earth and GM_Moon separately, so MU_EARTH is Earth alone. Two-body μ
 for the Earth-Moon barycenter = MU_SOL + MU_EARTH + MU_LUNA. Never
 compute μ as G·M.
 
-`orbits.rs` — COMPLETE for coasting bodies, validated against JPL. Three
-pure free functions, each taking `&OrbitalElements` where relevant:
+`orbits.rs` — COMPLETE for coasting bodies, FULLY 3D, validated against
+JPL including an inclined body. Four pure free functions plus one private
+helper:
 - `propagate_mean_anomaly(&elements, mu, dt) -> f64` — M₀ + n·dt,
   rem_euclid into [0, 2π). dt is seconds since elements.epoch.
 - `solve_kepler(ma, ecc) -> Result<f64, KeplerError>` — Newton from E₀=M,
   tol 1e-12 on the step, 30-iter cap. thiserror variants NotElliptical /
   NotConverged carry the offending inputs.
-- `position_at(&elements, ecc_anomaly) -> DVec2` — meters, heliocentric
-  ecliptic. Uses the direct perifocal form x′ = a(cos E − e),
-  y′ = a√(1−e²)·sin E (no true anomaly needed for position), rotated by
-  `DVec2::from_angle(ω).rotate(..)`.
-The planned `elements.position_at(mu, dt)` convenience method chaining all
-three is NOT yet written. 7 unit tests: solver edge cases, (M, e) grid
-round-trip (prime step counts, deliberately), circle/periapsis/apoapsis
-degenerate orbits, Horizons known-answer.
+- `position_at(&elements, ecc_anomaly) -> DVec3` — meters, heliocentric
+  ecliptic. Direct perifocal form x′ = a(cos E − e), y′ = a√(1−e²)·sin E,
+  z′ = 0 (no true anomaly needed), rotated by the shared helper.
+- `velocity_at(&elements, mu, ecc_anomaly) -> DVec3` — m/s;
+  ẋ′ = −(n·a²/r)·sin E, ẏ′ = (n·a²/r)·√(1−e²)·cos E, same rotation.
+  (The long-flagged y_prime bug was fixed 2026-07-16 before the 3D flip;
+  moved here from vectors.rs.)
+- `perifocal_to_ecliptic(&elements) -> DMat3` — PRIVATE; the ONE shared
+  ZXZ rotation, `Rz(Ω) * Rx(i) * Rz(ω)` (glam right-to-left, ω applies
+  first; a comment in code guards the order).
+The planned `elements.position_at(mu, dt)` convenience method chaining
+propagate → solve → position is NOT yet written. 9 unit tests: solver
+edge cases, (M, e) grid (prime step counts), circle/periapsis/apoapsis,
+two Horizons known answers. The circle test's alternate-route check was
+reworked for 3D: fold only ω into the in-plane angle (argument of
+latitude u = ω + E — the foldable rotation shares E's axis), then apply
+Rz(Ω)·Rx(i) explicitly; different arithmetic route from production, so
+it catches rotation-order bugs. Its elements use distinct nonzero i/Ω/ω
+(0.1 / 0.333 / 0.777). Periapsis/apoapsis tests keep zero angles
+deliberately — they assert only |r|, which is rotation-invariant.
 
-Horizons test (`test_earth_coasting_to_jpl_data_2d`): EMB relative to Sun
-body center, DE441, JD 2451545.0 + {0, 121.75, 243.5, 365.25} days.
-Observed misses: 0.15 m at dt=0 (transcription exact), growing to
-~3,300–7,700 km across the year — the measured cost of the two-body
-assumption (exceeds the 1,000 km budget within a year; accepted for
-gameplay). Assert tolerance 1e7 m with that headroom. Horizons' printed
-"Keplerian GM" matched MU_SOL + MU_EARTH + MU_LUNA to every digit. EMB z
-stayed within ~360 km of the ecliptic all year — empirical license for 2D.
+Horizons known-answer tests, both 3D (IN/OM/W fed as published, each
+individually `.to_radians()`; expected vectors carry the z column):
+- `test_earth_coasting_to_jpl_data` — EMB relative to Sun body center,
+  DE441, JD 2451545.0 + {0, 121.75, 243.5, 365.25} days. Misses 0.15 m
+  at dt=0 (transcription exact) growing to ~3,300–7,700 km over the year
+  (two-body cost; exceeds the 1,000 km budget within a year; accepted
+  for gameplay). Tolerance 1e7 m. Horizons "Keplerian GM" ==
+  MU_SOL + MU_EARTH + MU_LUNA to every digit.
+- `test_pallas_coasting_to_jpl_data` — 2 Pallas (JPL#74 small-body
+  solution), same span/step/center. Chosen over Mercury for inclination
+  signal: i ≈ 34.85° vs 7°. (Mercury's GR perihelion precession was
+  raised as a concern but is ~120 km/yr — negligible; even its Newtonian
+  perturbations are only ~12× that. Inclination coverage was the real
+  criterion.) μ = MU_SOL alone; Keplerian GM matched it to every printed
+  digit. Measured miss profile: 0 / 6,041 / 22,235 / 43,135 km across
+  the year — Jupiter perturbation, ~6× the EMB cost, superlinear because
+  the drifting semi-major axis compounds along-track. Tolerance 6e7 m
+  (~1.4× headroom, same ratio as the EMB test). Debugging cross-check
+  worth remembering: each Horizons row's own osculating elements
+  reproduce that instant's truth vector to sub-meter at i=34.8°, which
+  validates the ZXZ geometry independent of the dynamics.
+- Campaign-data consequence: belt objects blow the 1,000 km budget ~40×
+  within a year of a frozen element set. When seeding `data/`, asteroid
+  elements want an epoch near the campaign's game date; planets are far
+  more forgiving.
 
-Raw Horizons outputs ARE committed, at `crates/sim-core/test_data/`
-(horizons_emb_elements.txt, horizons_emb_vectors.txt) — note the
-underscore; the provenance comment in orbits.rs says `testdata/` and
-should be fixed to match. Receipt convention: raw dump committed
-verbatim, short query-fingerprint comment above the test, record the
-observed miss that justified the tolerance.
+Raw Horizons outputs committed at `crates/sim-core/test_data/`
+(horizons_{emb,pallas}_{elements,vectors}.txt). Receipt convention: raw
+dump committed verbatim, short query-fingerprint comment above the test,
+record the observed miss that justified the tolerance.
 
-`vectors.rs` — IN PROGRESS, mid-3D-migration. StateVector
-(position/velocity, derives + serde done), Trajectory enum committed
-(epoch settled: tuple payloads `(StateVector, Epoch)`; Retrograde variant
-present but slated for deletion — see domain decisions),
-`elements_to_state_vector` and `velocity_at` written; no tests yet.
-KNOWN BUG in velocity_at y_prime (twice-flagged, still unfixed as of
-2026-07-16): `1.0 - e.powi(2).sqrt()` is 1−e not √(1−e²) (parens must
-close before .sqrt()), and the term is SUBTRACTED where the formula
-multiplies. Correct: ẏ′ = (n·a²/r)·√(1−e²)·cos E. Fix before migrating.
+`vectors.rs` — StateVector (DVec3 position/velocity, derives + serde),
+Trajectory enum (Elliptic/Escape/PureRadial; Retrograde deleted per
+domain decisions), `elements_to_state_vector(&elements, mu, E)`
+composing position_at + velocity_at. Module split is by frame:
+orbits.rs owns the elements world (both perifocal functions + the
+rotation helper, which stays private there); vectors.rs owns the
+Cartesian world and the conversions crossing the boundary. No tests
+yet; `Trajectory::from_state` not yet written.
 
-3D migration checklist (branch adventure-to-the-third-dimension):
-DVec2 lives only in orbits.rs + vectors.rs. (1) shared
-perifocal → ecliptic DMat3 helper (glam a*b applies b first — Rz(Ω) *
-Rx(i) * Rz(ω) is correct, ω first); (2) position_at/velocity_at return
-DVec3 (z′=0 before rotation); (3) StateVector fields DVec3; (4) delete
-Trajectory::Retrograde, h = r.cross(v); (5) EMB Horizons test: stop
-folding W+OM, feed IN/OM/W as published, expected vectors gain z column
-from horizons_emb_vectors.txt (test_data files are already 3D — columns
-were being discarded); (6) test_position_at_circle alt-route check
-(from_angle(ω+E)) only valid in-plane, rework; (7) NEW inclined-body
-known answer required — EMB i ≈ 0.0004° exercises none of the i/Ω code
-(Mercury i≈7° natural pick, same receipt convention); grids need
-mutually distinct nonzero i/Ω/ω. Then: `Trajectory::from_state` in full
-3D (h, node vector ẑ×h → Ω, i = acos(h_z/|h|), e vector, ω from node
-with quadrant from e_z; singularities: i≈0 → Ω undefined [the old 2D
-world is now the degenerate case], e≈0 → ω undefined, both at once).
-e≈0 convention: ω = 0; round-trip tests compare positions or ω+M
-jointly, not ω alone. Test known answer: J2000-epoch Horizons vector
-row; matches! for classification, let-else for payload extraction.
+3D migration (branch adventure-to-the-third-dimension): checklist items
+1–7 are DONE — shared DMat3 helper, DVec3 returns, DVec3 StateVector,
+Retrograde deleted, Horizons tests unfolded to 3D with z columns,
+circle test reworked, inclined known answer added (Pallas, not Mercury).
+Remaining: `Trajectory::from_state` in full 3D (h = r.cross(v), node
+vector ẑ×h → Ω, i = acos(h_z/|h|), e vector, ω from node with quadrant
+from e_z; singularities: i≈0 → Ω undefined [the old 2D world is now the
+degenerate case], e≈0 → ω undefined, both at once). e≈0 convention:
+ω = 0; round-trip tests compare positions or ω+M jointly, not ω alone.
+Test known answer: J2000-epoch Horizons vector row; matches! for
+classification, let-else for payload extraction.
+
+Clippy/fmt/tests all green as of 2026-07-17 (the excessive_precision
+literal and the cosmetic nits from the 3D review are fixed).
 
 Next up, in order:
-1. Finish `vectors.rs` per above.
+1. Finish `vectors.rs`: `Trajectory::from_state` + tests (round-trip
+   elements ↔ state vector, classification known answers) per above.
 2. Convenience entry point chaining propagate → solve → position, then
    the CLI plot/solve commands.
+3. PINNED FEATURE (2026-07-17, wanted after the thrust integrator):
+   perturbed-coast propagation via special perturbations — reuse the
+   powered-flight numerical integrator with acceleration = solar
+   two-body + Σ over perturbers of μ_k·(direct − indirect) terms;
+   perturber positions come from existing Kepler propagation (analytic
+   rails, hierarchy makes it cheap). The indirect term (the perturber
+   also accelerates the heliocentric origin) is mandatory — omitting it
+   wrongs the correction by roughly its own size. Jupiter first
+   (~43,000 km/yr on Pallas), Saturn is a few percent of Jupiter,
+   Uranus/Neptune noise. Truncate the perturber sum by error budget,
+   same method as test tolerances: measure, compare, keep what matters.
 
 ## Known gotchas (avoid repeats)
 
@@ -269,3 +303,15 @@ Next up, in order:
 - Angles in OrbitalElements only feed sin/cos, so out-of-[0, 2π) values
   work, but keep them canonical on construction (rem_euclid) so tests and
   eyeballs agree.
+- Horizons transcription (bitten 2026-07-17, three ways at once): a
+  dropped exponent sign turns `E-04` into `e4` (Earth's IN became 10,346°);
+  EVERY angle field needs its own `.to_radians()` — the two added for 3D
+  (IN, OM) shipped as raw degrees while their neighbors were converted;
+  and the 2D fold is dead — `arg_periapsis` is W as published, never
+  OM + W (the rotation matrix applies Ω itself; summing double-counts it).
+  The dt=0 row hitting to sub-meter is the transcription check; bad
+  angles don't error, they just propagate silently to a spectacular miss.
+- Small-body Horizons files print the orbit-solution elements (at the
+  solution's own epoch) in the HEADER — transcribe from the $$SOE table
+  rows, not the header block. Provenance is a JPL#N solution ID, not a
+  DE ephemeris number.
