@@ -50,7 +50,7 @@ impl Trajectory {
             let cos_e = (1.0 - r_len / semi_major_axis) / eccentricity;
             let sin_e = r.dot(v) / (eccentricity * (mu * semi_major_axis).sqrt());
             let big_e = sin_e.atan2(cos_e);
-            big_e - eccentricity * big_e.sin().rem_euclid(TAU)
+            (big_e - eccentricity * big_e.sin()).rem_euclid(TAU)
         };
         let elements = OrbitalElements {
             semi_major_axis,
@@ -79,4 +79,174 @@ pub fn elements_to_state_vector(
     let position = position_at(elements, ecc_anomaly);
     let velocity = velocity_at(elements, mu, ecc_anomaly);
     StateVector { position, velocity }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bodies::{MU_EARTH, MU_LUNA, MU_SOL};
+    use crate::orbits::{propagate_mean_anomaly, solve_kepler};
+    use crate::time::J2000;
+
+    // Known-answer test against JPL Horizons (DE441), retrieved 2026-07-14.
+    // Target: Earth-Moon Barycenter (3), center: Sun body center (500@10),
+    // frame: Ecliptic of J2000.0, units KM-S/deg.
+    // Span JD 2451545.0..2451910.25 (J2000 + 365.25 d), step 175,320 min.
+    // Raw output: test_data/horizons_emb_elements.txt, horizons_emb_vectors.txt.
+    // Horizons' "Keplerian GM" = 1.3271284354451501e11 km³/s²,
+    //   == MU_SOL + MU_EARTH + MU_LUNA (validates bodies.rs sum).
+    // Observed miss vs DE441: 0.15 m at dt=0; ~3,300–7,700 km over the year
+    //   (two-body assumption cost; tolerance 1e7 m set with headroom).
+    #[test]
+    fn test_earth_round_trip() {
+        let mu = MU_SOL + MU_EARTH + MU_LUNA;
+        let elements = create_test_elements(
+            1.495973362233347e8 * 1000f64,
+            1.670236222428361e-2,
+            1.034624342994112e-4f64.to_radians(),
+            1.402921798841513e2f64.to_radians(),
+            3.226257524989104e2f64.to_radians(),
+            3.575452038219296e2f64.to_radians(),
+        );
+        let expected = [
+            StateVector {
+                position: DVec3::new(
+                    -2.65025768897131e7,
+                    1.44693955627991e8,
+                    -1.704331902042031e2,
+                ) * 1000f64,
+                velocity: DVec3::new(
+                    -2.978644078798413e1,
+                    -5.47817682234424e0,
+                    4.197340759137802e-5,
+                ) * 1000f64,
+            },
+            StateVector {
+                position: DVec3::new(
+                    -1.118015459197586e8,
+                    -1.011745526923638e8,
+                    3.030213951617479e2,
+                ) * 1000f64,
+                velocity: DVec3::new(
+                    1.950301801249175e1,
+                    -2.219923219984049e1,
+                    2.46575859179643e-5,
+                ) * 1000f64,
+            },
+            StateVector {
+                position: DVec3::new(
+                    1.408123843059221e8,
+                    -5.444539204997468e7,
+                    1.579894218221307e1,
+                ) * 1000f64,
+                velocity: DVec3::new(
+                    1.025721827437963e1,
+                    2.767237865219828e1,
+                    -6.838284098087399e-5,
+                ) * 1000f64,
+            },
+            StateVector {
+                position: DVec3::new(
+                    -2.64847106437987e7,
+                    1.44696674101079e8,
+                    -3.570930067077279e2,
+                ) * 1000f64,
+                velocity: DVec3::new(
+                    -2.978761317626597e1,
+                    -5.473981788314025e0,
+                    2.552631990759835e-5,
+                ) * 1000f64,
+            },
+        ];
+        for i in 0..4 {
+            let ma = propagate_mean_anomaly(&elements, mu, i as f64 * 175320f64 * 60f64);
+            let ecc_anom = solve_kepler(ma, elements.eccentricity);
+            let state = elements_to_state_vector(&elements, mu, ecc_anom.unwrap());
+            let traj =
+                Trajectory::from_state(state, mu, elements.epoch + (i as f64 * 175320f64 * 60f64));
+            let Elliptic(elements2) = traj else {
+                panic!("trajectory non-elliptic on iteration {}", i)
+            };
+            //let ma2 = propagate_mean_anomaly(&elements2, mu, i as f64 * 175320f64 * 60f64);
+            assert!((elements.semi_major_axis - elements2.semi_major_axis).abs() <= 1e-3f64);
+            assert!((elements.eccentricity - elements2.eccentricity).abs() <= 1e-5f64);
+            assert!((elements.inclination - elements2.inclination).abs() <= 1e-5f64);
+            assert!((elements.ascending_node - elements2.ascending_node).abs() <= 1e-9f64);
+            assert!((elements.arg_periapsis - elements2.arg_periapsis).abs() <= 1e-9f64);
+            assert!((ma - elements2.mean_anomaly_epoch).abs() <= 1e-9f64);
+            let ecc_anom2 = solve_kepler(elements2.mean_anomaly_epoch, elements2.eccentricity);
+            let state = elements_to_state_vector(&elements2, mu, ecc_anom2.unwrap());
+            assert!(
+                (state.position.x - expected[i].position.x).abs() <= 1e7f64,
+                "on iteration {}, derived position.x {} was outside of tolerance range from expected position.x {}",
+                i,
+                state.position.x,
+                expected[i].position.x,
+            );
+            assert!(
+                (state.position.y - expected[i].position.y).abs() <= 1e7f64,
+                "on iteration {}, derived position.y {} was outside of tolerance range from expected position.y {}",
+                i,
+                state.position.y,
+                expected[i].position.y
+            );
+            assert!(
+                (state.position.z - expected[i].position.z).abs() <= 1e7f64,
+                "on iteration {}, derived position.z {} was outside of tolerance range from expected position.z {}",
+                i,
+                state.position.z,
+                expected[i].position.z
+            );
+            assert!(
+                (state.velocity.x - expected[i].velocity.x).abs() <= 1e1f64,
+                "on iteration {}, derived velocity.x {} was outside of tolerance range from expected velocity.x {}",
+                i,
+                state.velocity.x,
+                expected[i].velocity.x
+            );
+            assert!(
+                (state.velocity.y - expected[i].velocity.y).abs() <= 1e1f64,
+                "on iteration {}, derived velocity.y {} was outside of tolerance range from expected velocity.y {}",
+                i,
+                state.velocity.y,
+                expected[i].velocity.y
+            );
+            assert!(
+                (state.velocity.z - expected[i].velocity.z).abs() <= 1e1f64,
+                "on iteration {}, derived velocity.z {} was outside of tolerance range from expected velocity.z {}",
+                i,
+                state.velocity.z,
+                expected[i].velocity.z
+            );
+        }
+    }
+    // Known-answer test against JPL Horizons (JPL#74), retrieved 2026-07-17.
+    // Target: 2 Pallas (A802 FA), center: Sun body center (500@10),
+    // frame: Ecliptic of J2000.0, units KM-S/deg.
+    // Span JD 2451545.0..2451910.25 (J2000 + 365.25 d), step 175,320 min.
+    // Raw output: test_data/horizons_pallas_elements.txt, horizons_pallas_vectors.txt.
+    // Horizons' "Keplerian GM" = 1.3271244004127939e11 km³/s²,
+    //   == MU_SOL
+    // Observed miss vs JPL#74: ~6,041 / 22,235 / 43,135 km over the year
+    //   (two-body assumption cost; tolerance 6e7 m set with headroom).
+    #[test]
+    fn test_pallas_round_trip() {}
+    fn create_test_elements(
+        semi_major_axis: f64,
+        eccentricity: f64,
+        inclination: f64,
+        ascending_node: f64,
+        arg_periapsis: f64,
+        mean_anomaly_epoch: f64,
+    ) -> OrbitalElements {
+        OrbitalElements {
+            semi_major_axis,
+            eccentricity,
+            inclination,
+            ascending_node,
+            arg_periapsis,
+            mean_anomaly_epoch,
+            epoch: *J2000,
+        }
+    }
 }
