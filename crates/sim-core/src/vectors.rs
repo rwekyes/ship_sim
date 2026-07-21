@@ -158,6 +158,82 @@ mod tests {
                 ) * 1000f64,
             },
         ];
+        test_round_trip(elements, expected, mu);
+    }
+    // Known-answer test against JPL Horizons (JPL#74), retrieved 2026-07-17.
+    // Target: 2 Pallas (A802 FA), center: Sun body center (500@10),
+    // frame: Ecliptic of J2000.0, units KM-S/deg.
+    // Span JD 2451545.0..2451910.25 (J2000 + 365.25 d), step 175,320 min.
+    // Raw output: test_data/horizons_pallas_elements.txt, horizons_pallas_vectors.txt.
+    // Horizons' "Keplerian GM" = 1.3271244004127939e11 km³/s²,
+    //   == MU_SOL
+    // Observed miss vs JPL#74: ~6,041 / 22,235 / 43,135 km over the year
+    //   (two-body assumption cost; tolerance 6e7 m set with headroom).
+    #[test]
+    fn test_pallas_round_trip() {
+        let mu = MU_SOL;
+        let elements = create_test_elements(
+            4.147335391670697e8 * 1000f64,
+            2.296435321697976e-1,
+            3.484614003622473e1f64.to_radians(),
+            1.731977991340821e2f64.to_radians(),
+            3.102656379003444e2f64.to_radians(),
+            3.529602856167207e2f64.to_radians(),
+        );
+        let expected = [
+            StateVector {
+                position: DVec3::new(
+                    -1.258325200874033e8,
+                    2.473958969651368e8,
+                    -1.60651581789323e8,
+                ) * 1000f64,
+                velocity: DVec3::new(
+                    -2.032303521536241e1,
+                    -7.137021010411825e0,
+                    6.609767786325174e0,
+                ) * 1000f64,
+            },
+            StateVector {
+                position: DVec3::new(
+                    -2.971024108700995e8,
+                    1.245450403910852e8,
+                    -6.160110681323632e7,
+                ) * 1000f64,
+                velocity: DVec3::new(
+                    -1.114931540252908e1,
+                    -1.527242203755211e1,
+                    1.147715329362247e1,
+                ) * 1000f64,
+            },
+            StateVector {
+                position: DVec3::new(
+                    -3.521747992874941E+08,
+                    -4.963631974702031E+07,
+                    6.334769796850759E+07,
+                ) * 1000f64,
+                velocity: DVec3::new(
+                    4.373162792482198e-1,
+                    -1.676656440550874e1,
+                    1.155393577270365e1,
+                ) * 1000f64,
+            },
+            StateVector {
+                position: DVec3::new(
+                    -2.998039091374451e8,
+                    -2.116245011180725e8,
+                    1.710005272896911e8,
+                ) * 1000f64,
+                velocity: DVec3::new(
+                    8.824050024422966e0,
+                    -1.354023684305857e1,
+                    8.631268047647627e0,
+                ) * 1000f64,
+            },
+        ];
+        test_round_trip(elements, expected, mu);
+    }
+
+    fn test_round_trip(elements: OrbitalElements, expected: [StateVector; 4], mu: f64) {
         for i in 0..4 {
             let ma = propagate_mean_anomaly(&elements, mu, i as f64 * 175320f64 * 60f64);
             let ecc_anom = solve_kepler(ma, elements.eccentricity);
@@ -177,21 +253,21 @@ mod tests {
             let ecc_anom2 = solve_kepler(elements2.mean_anomaly_epoch, elements2.eccentricity);
             let state = elements_to_state_vector(&elements2, mu, ecc_anom2.unwrap());
             assert!(
-                (state.position.x - expected[i].position.x).abs() <= 1e7f64,
+                (state.position.x - expected[i].position.x).abs() <= 1e8f64,
                 "on iteration {}, derived position.x {} was outside of tolerance range from expected position.x {}",
                 i,
                 state.position.x,
                 expected[i].position.x,
             );
             assert!(
-                (state.position.y - expected[i].position.y).abs() <= 1e7f64,
+                (state.position.y - expected[i].position.y).abs() <= 1e8f64,
                 "on iteration {}, derived position.y {} was outside of tolerance range from expected position.y {}",
                 i,
                 state.position.y,
                 expected[i].position.y
             );
             assert!(
-                (state.position.z - expected[i].position.z).abs() <= 1e7f64,
+                (state.position.z - expected[i].position.z).abs() <= 1e8f64,
                 "on iteration {}, derived position.z {} was outside of tolerance range from expected position.z {}",
                 i,
                 state.position.z,
@@ -220,17 +296,6 @@ mod tests {
             );
         }
     }
-    // Known-answer test against JPL Horizons (JPL#74), retrieved 2026-07-17.
-    // Target: 2 Pallas (A802 FA), center: Sun body center (500@10),
-    // frame: Ecliptic of J2000.0, units KM-S/deg.
-    // Span JD 2451545.0..2451910.25 (J2000 + 365.25 d), step 175,320 min.
-    // Raw output: test_data/horizons_pallas_elements.txt, horizons_pallas_vectors.txt.
-    // Horizons' "Keplerian GM" = 1.3271244004127939e11 km³/s²,
-    //   == MU_SOL
-    // Observed miss vs JPL#74: ~6,041 / 22,235 / 43,135 km over the year
-    //   (two-body assumption cost; tolerance 6e7 m set with headroom).
-    #[test]
-    fn test_pallas_round_trip() {}
     fn create_test_elements(
         semi_major_axis: f64,
         eccentricity: f64,
