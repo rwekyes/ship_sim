@@ -142,7 +142,7 @@ mod tests {
                 velocity: DVec3::new(
                     1.025721827437963e1,
                     2.767237865219828e1,
-                    -6.838284098087399e-5,
+                    -6.8382840980874e-5, // -6.838284098087399e-5 - rounded to appease clippy
                 ) * 1000f64,
             },
             StateVector {
@@ -234,7 +234,7 @@ mod tests {
     }
 
     fn test_round_trip(elements: OrbitalElements, expected: [StateVector; 4], mu: f64) {
-        for i in 0..4 {
+        for (i, exp) in expected.iter().enumerate() {
             let ma = propagate_mean_anomaly(&elements, mu, i as f64 * 175320f64 * 60f64);
             let ecc_anom = solve_kepler(ma, elements.eccentricity);
             let state = elements_to_state_vector(&elements, mu, ecc_anom.unwrap());
@@ -253,46 +253,46 @@ mod tests {
             let ecc_anom2 = solve_kepler(elements2.mean_anomaly_epoch, elements2.eccentricity);
             let state = elements_to_state_vector(&elements2, mu, ecc_anom2.unwrap());
             assert!(
-                (state.position.x - expected[i].position.x).abs() <= 1e8f64,
+                (state.position.x - exp.position.x).abs() <= 1e8f64,
                 "on iteration {}, derived position.x {} was outside of tolerance range from expected position.x {}",
                 i,
                 state.position.x,
-                expected[i].position.x,
+                exp.position.x,
             );
             assert!(
-                (state.position.y - expected[i].position.y).abs() <= 1e8f64,
+                (state.position.y - exp.position.y).abs() <= 1e8f64,
                 "on iteration {}, derived position.y {} was outside of tolerance range from expected position.y {}",
                 i,
                 state.position.y,
-                expected[i].position.y
+                exp.position.y
             );
             assert!(
-                (state.position.z - expected[i].position.z).abs() <= 1e8f64,
+                (state.position.z - exp.position.z).abs() <= 1e8f64,
                 "on iteration {}, derived position.z {} was outside of tolerance range from expected position.z {}",
                 i,
                 state.position.z,
-                expected[i].position.z
+                exp.position.z
             );
             assert!(
-                (state.velocity.x - expected[i].velocity.x).abs() <= 1e1f64,
+                (state.velocity.x - exp.velocity.x).abs() <= 1e1f64,
                 "on iteration {}, derived velocity.x {} was outside of tolerance range from expected velocity.x {}",
                 i,
                 state.velocity.x,
-                expected[i].velocity.x
+                exp.velocity.x
             );
             assert!(
-                (state.velocity.y - expected[i].velocity.y).abs() <= 1e1f64,
+                (state.velocity.y - exp.velocity.y).abs() <= 1e1f64,
                 "on iteration {}, derived velocity.y {} was outside of tolerance range from expected velocity.y {}",
                 i,
                 state.velocity.y,
-                expected[i].velocity.y
+                exp.velocity.y
             );
             assert!(
-                (state.velocity.z - expected[i].velocity.z).abs() <= 1e1f64,
+                (state.velocity.z - exp.velocity.z).abs() <= 1e1f64,
                 "on iteration {}, derived velocity.z {} was outside of tolerance range from expected velocity.z {}",
                 i,
                 state.velocity.z,
-                expected[i].velocity.z
+                exp.velocity.z
             );
         }
     }
