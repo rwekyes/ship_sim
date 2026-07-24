@@ -20,6 +20,7 @@ pub enum Trajectory {
     PureRadial(StateVector, Epoch),
 }
 impl Trajectory {
+    /// Returns a Trajectory from a given StateVector, mu, and epoch
     pub fn from_state(state: StateVector, mu: f64, epoch: Epoch) -> Trajectory {
         let r = state.position;
         let r_len = r.length();
@@ -64,7 +65,7 @@ impl Trajectory {
         Elliptic(elements)
     }
 }
-
+/// Signed angle from from, to to, swept around h_hat
 fn angle_in_plane(from: DVec3, to: DVec3, h_hat: DVec3) -> f64 {
     from.cross(to)
         .dot(h_hat)
@@ -233,6 +234,31 @@ mod tests {
         test_round_trip(elements, expected, mu);
     }
 
+    #[test]
+    fn test_circular() {
+        let mu = MU_SOL;
+        let elements = create_test_elements(149_597_870_691.0, 0.0, 0.1, 0.333, 0.777, 0.0);
+        let ecc_anomaly = solve_kepler(elements.mean_anomaly_epoch, elements.eccentricity).unwrap();
+        let state = elements_to_state_vector(&elements, mu, ecc_anomaly);
+        let traj = Trajectory::from_state(state, mu, *J2000);
+        let Elliptic(elements2) = traj else {
+            panic!("trajectory non-elliptic")
+        };
+        let ecc_anomaly2 =
+            solve_kepler(elements2.mean_anomaly_epoch, elements2.eccentricity).unwrap();
+        let state2 = elements_to_state_vector(&elements2, mu, ecc_anomaly2);
+        assert!(
+            state.position.distance(state2.position) <= 1e3,
+            "{}",
+            state.position.distance(state2.position)
+        );
+        assert!(
+            state.velocity.distance(state2.velocity) <= 1e1,
+            "{}",
+            state.velocity.distance(state2.velocity)
+        );
+    }
+
     fn test_round_trip(elements: OrbitalElements, expected: [StateVector; 4], mu: f64) {
         for (i, exp) in expected.iter().enumerate() {
             let ma = propagate_mean_anomaly(&elements, mu, i as f64 * 175320f64 * 60f64);
@@ -243,7 +269,6 @@ mod tests {
             let Elliptic(elements2) = traj else {
                 panic!("trajectory non-elliptic on iteration {}", i)
             };
-            //let ma2 = propagate_mean_anomaly(&elements2, mu, i as f64 * 175320f64 * 60f64);
             assert!((elements.semi_major_axis - elements2.semi_major_axis).abs() <= 1e-3f64);
             assert!((elements.eccentricity - elements2.eccentricity).abs() <= 1e-5f64);
             assert!((elements.inclination - elements2.inclination).abs() <= 1e-5f64);
@@ -253,21 +278,21 @@ mod tests {
             let ecc_anom2 = solve_kepler(elements2.mean_anomaly_epoch, elements2.eccentricity);
             let state = elements_to_state_vector(&elements2, mu, ecc_anom2.unwrap());
             assert!(
-                (state.position.x - exp.position.x).abs() <= 1e8f64,
+                (state.position.x - exp.position.x).abs() <= 6e7f64,
                 "on iteration {}, derived position.x {} was outside of tolerance range from expected position.x {}",
                 i,
                 state.position.x,
                 exp.position.x,
             );
             assert!(
-                (state.position.y - exp.position.y).abs() <= 1e8f64,
+                (state.position.y - exp.position.y).abs() <= 6e7f64,
                 "on iteration {}, derived position.y {} was outside of tolerance range from expected position.y {}",
                 i,
                 state.position.y,
                 exp.position.y
             );
             assert!(
-                (state.position.z - exp.position.z).abs() <= 1e8f64,
+                (state.position.z - exp.position.z).abs() <= 6e7f64,
                 "on iteration {}, derived position.z {} was outside of tolerance range from expected position.z {}",
                 i,
                 state.position.z,
