@@ -259,6 +259,78 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_circular_equatorial() {
+        let mu = MU_SOL;
+        let elements = create_test_elements(149_597_870_691.0, 0.0, 0.0, 0.333, 0.777, 0.0);
+        let ecc_anomaly = solve_kepler(elements.mean_anomaly_epoch, elements.eccentricity).unwrap();
+        let state = elements_to_state_vector(&elements, mu, ecc_anomaly);
+        let traj = Trajectory::from_state(state, mu, *J2000);
+        let Elliptic(elements2) = traj else {
+            panic!("trajectory non-elliptic")
+        };
+        let ecc_anomaly2 =
+            solve_kepler(elements2.mean_anomaly_epoch, elements2.eccentricity).unwrap();
+        let state2 = elements_to_state_vector(&elements2, mu, ecc_anomaly2);
+        assert!(
+            state.position.distance(state2.position) <= 1e3,
+            "{}",
+            state.position.distance(state2.position)
+        );
+        assert!(
+            state.velocity.distance(state2.velocity) <= 1e1,
+            "{}",
+            state.velocity.distance(state2.velocity)
+        );
+    }
+
+    #[test]
+    fn test_equatorial() {
+        let mu = MU_SOL;
+        let elements = create_test_elements(149_597_870_691.0, 0.1, 0.0, 0.333, 0.777, 0.0);
+        let ecc_anomaly = solve_kepler(elements.mean_anomaly_epoch, elements.eccentricity).unwrap();
+        let state = elements_to_state_vector(&elements, mu, ecc_anomaly);
+        let traj = Trajectory::from_state(state, mu, *J2000);
+        let Elliptic(elements2) = traj else {
+            panic!("trajectory non-elliptic")
+        };
+        let ecc_anomaly2 =
+            solve_kepler(elements2.mean_anomaly_epoch, elements2.eccentricity).unwrap();
+        let state2 = elements_to_state_vector(&elements2, mu, ecc_anomaly2);
+        assert!(
+            state.position.distance(state2.position) <= 1e3,
+            "{}",
+            state.position.distance(state2.position)
+        );
+        assert!(
+            state.velocity.distance(state2.velocity) <= 1e1,
+            "{}",
+            state.velocity.distance(state2.velocity)
+        );
+    }
+
+    #[test]
+    fn test_escape() {
+        let mu = MU_SOL;
+        let state = StateVector {
+            position: DVec3::new(1.495978707e11, 0.0, 0.0),
+            velocity: DVec3::new(0.0, 50_000.0, 0.0),
+        };
+        let traj = Trajectory::from_state(state, mu, *J2000);
+        assert!(matches!(traj, Trajectory::Escape(_,_)));
+    }
+
+    #[test]
+    fn test_pure_radial() {
+        let mu = MU_SOL;
+        let state = StateVector {
+            position: DVec3::new(4.0e10, 8.0e10, 1.2e11),
+            velocity: DVec3::new(8_000.0, 16_000.0, 24_000.0),
+        };
+        let traj = Trajectory::from_state(state, mu, *J2000);
+        assert!(matches!(traj, Trajectory::PureRadial(_,_)));
+    }
+
     fn test_round_trip(elements: OrbitalElements, expected: [StateVector; 4], mu: f64) {
         for (i, exp) in expected.iter().enumerate() {
             let ma = propagate_mean_anomaly(&elements, mu, i as f64 * 175320f64 * 60f64);
