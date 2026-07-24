@@ -317,7 +317,7 @@ mod tests {
             velocity: DVec3::new(0.0, 50_000.0, 0.0),
         };
         let traj = Trajectory::from_state(state, mu, *J2000);
-        assert!(matches!(traj, Trajectory::Escape(_,_)));
+        assert!(matches!(traj, Trajectory::Escape(_, _)));
     }
 
     #[test]
@@ -328,7 +328,7 @@ mod tests {
             velocity: DVec3::new(8_000.0, 16_000.0, 24_000.0),
         };
         let traj = Trajectory::from_state(state, mu, *J2000);
-        assert!(matches!(traj, Trajectory::PureRadial(_,_)));
+        assert!(matches!(traj, Trajectory::PureRadial(_, _)));
     }
 
     fn test_round_trip(elements: OrbitalElements, expected: [StateVector; 4], mu: f64) {

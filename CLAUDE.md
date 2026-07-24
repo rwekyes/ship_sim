@@ -123,7 +123,7 @@ cargo member unless WASM.
 `cargo test --workspace`. Warnings are errors in CI. rust-toolchain.toml
 pins stable + components.
 
-## Current state (as of 2026-07-17)
+## Current state (as of 2026-07-23)
 
 Done: workspace scaffold, README, MIT license, .gitignore (/target, .idea/,
 data/*.db), rust-toolchain.toml, CI green, workspace inheritance wired,
@@ -207,36 +207,50 @@ Raw Horizons outputs committed at `crates/sim-core/test_data/`
 dump committed verbatim, short query-fingerprint comment above the test,
 record the observed miss that justified the tolerance.
 
-`vectors.rs` — StateVector (DVec3 position/velocity, derives + serde),
-Trajectory enum (Elliptic/Escape/PureRadial; Retrograde deleted per
-domain decisions), `elements_to_state_vector(&elements, mu, E)`
-composing position_at + velocity_at. Module split is by frame:
-orbits.rs owns the elements world (both perifocal functions + the
-rotation helper, which stays private there); vectors.rs owns the
-Cartesian world and the conversions crossing the boundary. No tests
-yet; `Trajectory::from_state` not yet written.
+`vectors.rs` — COMPLETE. StateVector (DVec3 position/velocity, derives +
+serde), Trajectory enum (Elliptic/Escape/PureRadial; Retrograde deleted
+per domain decisions), `elements_to_state_vector(&elements, mu, E)`
+composing position_at + velocity_at, and `Trajectory::from_state` in
+full 3D. Module split is by frame: orbits.rs owns the elements world
+(both perifocal functions + the rotation helper, which stays private
+there); vectors.rs owns the Cartesian world and the conversions crossing
+the boundary.
 
-3D migration (branch adventure-to-the-third-dimension): checklist items
-1–7 are DONE — shared DMat3 helper, DVec3 returns, DVec3 StateVector,
-Retrograde deleted, Horizons tests unfolded to 3D with z columns,
-circle test reworked, inclined known answer added (Pallas, not Mercury).
-Remaining: `Trajectory::from_state` in full 3D (h = r.cross(v), node
-vector ẑ×h → Ω, i = acos(h_z/|h|), e vector, ω from node with quadrant
-from e_z; singularities: i≈0 → Ω undefined [the old 2D world is now the
-degenerate case], e≈0 → ω undefined, both at once). e≈0 convention:
-ω = 0; round-trip tests compare positions or ω+M jointly, not ω alone.
-Test known answer: J2000-epoch Horizons vector row; matches! for
-classification, let-else for payload extraction.
+`Trajectory::from_state(state, mu, epoch) -> Trajectory` (takes StateVector
+by value, not &): h = r.cross(v); classify by |h|/(|r||v|) ≤ 1e-8 →
+PureRadial, then ε ≥ 0 → Escape, else Elliptic (radial check FIRST, before
+escape — a collinear state resolves to PureRadial regardless of energy).
+Element recovery: node n = ẑ×h; ecc_vec = v×h/μ − r̂; i = acos(h_z/|h|)
+clamped [−1,1]; a = −μ/2ε. Singularity handling via two guards — equatorial
+(i < 1e-8) swaps node_dir to DVec3::X, circular (e < 1e-8) swaps peri_dir
+to node_dir. ω = 0 in the circular case (convention); when circular, the
+mean anomaly slot instead carries the argument of latitude measured
+node→r (ω folded into M). A private `angle_in_plane(from, to, h_hat)`
+helper does the signed-angle-about-an-axis work (cross·axis atan2 dot,
+rem_euclid TAU), reused for Ω, ω, and the circular M. Non-circular M
+recovered via E from cos_e/sin_e → atan2 → M = E − e·sin E.
 
-Clippy/fmt/tests all green as of 2026-07-17 (the excessive_precision
-literal and the cosmetic nits from the 3D review are fixed).
+Tests (7, all pass): two Horizons elements→state→elements round-trips
+(test_earth_round_trip, test_pallas_round_trip — 4 sample points each,
+prime-ish step, reusing the shared test_round_trip helper) plus five
+edge cases: test_circular, test_circular_equatorial, test_equatorial
+(round-trip position/velocity within 1e3 m / 1e1 m/s), test_escape
+(50 km/s tangential at 1 AU, matches! Escape), test_pure_radial (v = 2e-7·r,
+a 3D non-axis-aligned collinear pair, matches! PureRadial). Round-trip
+gotcha baked into the edge-case tests: once ω is folded into M you must
+RE-SOLVE Kepler from the reconstructed elements' mean anomaly before
+rebuilding the state — reusing the original E puts a circular body at the
+wrong argument of latitude (the bug that stalled test_circular).
+
+3D migration (branch adventure-to-the-third-dimension): COMPLETE.
+Checklist items 1–7 plus `Trajectory::from_state` in full 3D all done.
+
+Clippy/fmt/tests all green as of 2026-07-23.
 
 Next up, in order:
-1. Finish `vectors.rs`: `Trajectory::from_state` + tests (round-trip
-   elements ↔ state vector, classification known answers) per above.
-2. Convenience entry point chaining propagate → solve → position, then
+1. Convenience entry point chaining propagate → solve → position, then
    the CLI plot/solve commands.
-3. PINNED FEATURE (2026-07-17, wanted after the thrust integrator):
+2. PINNED FEATURE (2026-07-17, wanted after the thrust integrator):
    perturbed-coast propagation via special perturbations — reuse the
    powered-flight numerical integrator with acceleration = solar
    two-body + Σ over perturbers of μ_k·(direct − indirect) terms;
