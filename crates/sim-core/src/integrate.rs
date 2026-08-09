@@ -56,36 +56,16 @@ mod tests {
     use crate::integrate::two_body;
     use crate::orbits::{OrbitalElements, solve_kepler};
     use crate::time::J2000;
-    use crate::vectors::{StateVector, elements_to_state_vector};
-    use glam::DVec3;
+    use crate::vectors::elements_to_state_vector;
 
     // Test the integrator vs the Kepler propagation
     // Observed miss: 2861969.4202166707m in 1/4 orbit for Earth, tolerance set to 3000000m
     #[test]
     fn integrate_vs_kepler() {
-        let mu = MU_SOL + MU_EARTH + MU_LUNA;
-        let elements = OrbitalElements {
-            semi_major_axis: 1.495973362233347e8 * 1000f64, // km conversion
-            eccentricity: 1.670236222428361e-2,
-            inclination: 1.034624342994112e-4f64.to_radians(),
-            ascending_node: 1.402921798841513e2f64.to_radians(),
-            arg_periapsis: 3.226257524989104e2f64.to_radians(),
-            mean_anomaly_epoch: 3.575452038219296e2f64.to_radians(),
-            epoch: *J2000,
-        };
-        let ecc_anomaly = solve_kepler(elements.mean_anomaly_epoch, elements.eccentricity).unwrap();
-        let initial_state = elements_to_state_vector(&elements, mu, ecc_anomaly);
-        let new_state = integrate(initial_state, 0.0, 175320.0 * 60.0, 60.0, |_t, s| {
-            two_body(mu, s)
-        });
-
-        let position = elements.position_at_dt(mu, 175320.0 * 60.0).unwrap();
-        let position_difference = new_state.position.distance(position);
+        let position_difference = kepler_miss(60.0);
         assert!(
             position_difference < 3e6,
-            "Difference between expected position {} and derived position {} is {}, which is greater than 3.0e6",
-            position,
-            new_state.position,
+            "Difference between expected position and derived position is {}, which is greater than 3.0e6",
             position_difference
         );
     }
@@ -137,12 +117,19 @@ mod tests {
     }
     // Step size convergence test
     // Observed miss: 1430987.6428220582m - true half of 2861969.4202166707m is 1430984.710108335m
-    // Difference of 2.932713723m
-    // Confirms
+    // Difference of 2.932713723m, ratio 0.5000010
     #[test]
     fn step_size_convergence() {
-        let mu = MU_SOL + MU_EARTH + MU_LUNA;
-        let elements = OrbitalElements {
+        let ratio = kepler_miss(30.0) / kepler_miss(60.0);
+        assert!(
+            ratio >= 0.48 && ratio <= 0.52,
+            "step_size_convergence: ratio {}",
+            ratio
+        );
+    }
+    // Helper returns J2000 elements for EMB
+    fn emb_j2000_elements() -> OrbitalElements {
+        OrbitalElements {
             semi_major_axis: 1.495973362233347e8 * 1000f64, // km conversion
             eccentricity: 1.670236222428361e-2,
             inclination: 1.034624342994112e-4f64.to_radians(),
@@ -150,21 +137,19 @@ mod tests {
             arg_periapsis: 3.226257524989104e2f64.to_radians(),
             mean_anomaly_epoch: 3.575452038219296e2f64.to_radians(),
             epoch: *J2000,
-        };
+        }
+    }
+    // helper computes the miss in meters between the integrator and the keplerian solver
+    fn kepler_miss(substep: f64) -> f64 {
+        let mu = MU_SOL + MU_EARTH + MU_LUNA;
+        let elements = emb_j2000_elements();
         let ecc_anomaly = solve_kepler(elements.mean_anomaly_epoch, elements.eccentricity).unwrap();
         let initial_state = elements_to_state_vector(&elements, mu, ecc_anomaly);
-        let new_state = integrate(initial_state, 0.0, 175320.0 * 60.0, 30.0, |_t, s| {
+        let new_state = integrate(initial_state, 0.0, 175320.0 * 60.0, substep, |_t, s| {
             two_body(mu, s)
         });
 
         let position = elements.position_at_dt(mu, 175320.0 * 60.0).unwrap();
-        let position_difference = new_state.position.distance(position);
-        assert!(
-            position_difference < 2e6,
-            "Difference between expected position {} and derived position {} is {}, which is greater than 2.0e6",
-            position,
-            new_state.position,
-            position_difference
-        );
+        new_state.position.distance(position)
     }
 }
