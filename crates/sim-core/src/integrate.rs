@@ -51,4 +51,58 @@ where
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use crate::bodies::{MU_EARTH, MU_LUNA, MU_SOL};
+    use crate::integrate::two_body;
+    use crate::vectors::StateVector;
+    use glam::DVec3;
+
+    // Known-answer test against JPL Horizons (DE441), retrieved 2026-07-14.
+    // Target: Earth-Moon Barycenter (3), center: Sun body center (500@10),
+    // frame: Ecliptic of J2000.0, units KM-S/deg.
+    // Span JD 2451545.0..2451910.25 (J2000 + 365.25 d), step 175,320 min.
+    // Raw output: test_data/horizons_emb_elements.txt, horizons_emb_vectors.txt.
+    // Horizons' "Keplerian GM" = 1.3271284354451501e11 km³/s²,
+    //   == MU_SOL + MU_EARTH + MU_LUNA (validates bodies.rs sum).
+    // Observed miss vs DE441: 0.15 m at dt=0; ~3,300–7,700 km over the year
+    //   (two-body assumption cost; tolerance 1e7 m set with headroom).
+    #[test]
+    fn coast_vs_horizons() {
+        let initial_state: StateVector = StateVector {
+            position: DVec3::new(
+                -2.650257688971310e7,
+                1.446939556279910e8,
+                -1.704331902042031e2,
+            ) * 1e3,
+            velocity: DVec3::new(
+                -2.978644078798413e1,
+                -5.478176822344240e0,
+                4.197340759137802e-5,
+            ) * 1e3,
+        };
+        let expected_state: StateVector = StateVector {
+            position: DVec3::new(
+                -1.118015459197586e8,
+                -1.011745526923638e8,
+                3.030213951617479e2,
+            ) * 1e3,
+            velocity: DVec3::new(
+                1.950301801249175e1,
+                -2.219923219984049e1,
+                2.465758591796430e-5,
+            ) * 1e3,
+        };
+        let new_state = integrate(initial_state, 0.0, 175320.0 * 60.0, 60.0, |_t, s| {
+            two_body(MU_SOL + MU_EARTH + MU_LUNA, s)
+        });
+        let difference: f64 = expected_state.position.distance(new_state.position);
+        assert!(
+            difference < 1.0e7,
+            "Difference between expected position {} and derived position {} is {}, which is greater than 1.0e7",
+            expected_state.position,
+            new_state.position,
+            difference
+        );
+    }
+}
