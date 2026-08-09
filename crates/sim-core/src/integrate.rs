@@ -39,10 +39,9 @@ where
         return state;
     }
     let h = dt_total / n;
-    let mut t = t0;
 
     for i in 0..(n as u32) {
-        t = t0 + i as f64 * h;
+        let t = t0 + i as f64 * h;
         let a = accel(t, &state);
         state.velocity += a * h;
         state.position += state.velocity * h;
@@ -74,15 +73,12 @@ mod tests {
             epoch: *J2000,
         };
         let ecc_anomaly = solve_kepler(elements.mean_anomaly_epoch, elements.eccentricity).unwrap();
-        let initial_state =
-            elements_to_state_vector(&elements, mu, ecc_anomaly);
+        let initial_state = elements_to_state_vector(&elements, mu, ecc_anomaly);
         let new_state = integrate(initial_state, 0.0, 175320.0 * 60.0, 60.0, |_t, s| {
             two_body(mu, s)
         });
 
-        let position = elements
-            .position_at_dt(mu, 175320.0 * 60.0)
-            .unwrap();
+        let position = elements.position_at_dt(mu, 175320.0 * 60.0).unwrap();
         let difference = new_state.position.distance(position);
         assert!(
             difference < 1e7,
@@ -105,13 +101,13 @@ mod tests {
     fn coast_vs_horizons() {
         let initial_state: StateVector = StateVector {
             position: DVec3::new(
-                -2.650257688971310e7,
-                1.446939556279910e8,
+                -2.65025768897131e7,
+                1.44693955627991e8,
                 -1.704331902042031e2,
             ) * 1e3,
             velocity: DVec3::new(
                 -2.978644078798413e1,
-                -5.478176822344240e0,
+                -5.47817682234424e0,
                 4.197340759137802e-5,
             ) * 1e3,
         };
@@ -124,7 +120,7 @@ mod tests {
             velocity: DVec3::new(
                 1.950301801249175e1,
                 -2.219923219984049e1,
-                2.465758591796430e-5,
+                2.46575859179643e-5,
             ) * 1e3,
         };
         let new_state = integrate(initial_state, 0.0, 175320.0 * 60.0, 60.0, |_t, s| {
