@@ -122,7 +122,7 @@ mod tests {
     fn step_size_convergence() {
         let ratio = kepler_miss(30.0) / kepler_miss(60.0);
         assert!(
-            ratio >= 0.48 && ratio <= 0.52,
+            (0.48..=0.52).contains(&ratio),
             "step_size_convergence: ratio {}",
             ratio
         );
