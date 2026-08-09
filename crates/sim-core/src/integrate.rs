@@ -60,6 +60,7 @@ mod tests {
     use glam::DVec3;
 
     // Test the integrator vs the Kepler propagation
+    // Observed miss: 2861969.4202166707m in 1/4 orbit for Earth, tolerance set to 3000000m
     #[test]
     fn integrate_vs_kepler() {
         let mu = MU_SOL + MU_EARTH + MU_LUNA;
@@ -79,13 +80,13 @@ mod tests {
         });
 
         let position = elements.position_at_dt(mu, 175320.0 * 60.0).unwrap();
-        let difference = new_state.position.distance(position);
+        let position_difference = new_state.position.distance(position);
         assert!(
-            difference < 1e7,
-            "Difference between expected position {} and derived position {} is {}, which is greater than 1.0e7",
+            position_difference < 3e6,
+            "Difference between expected position {} and derived position {} is {}, which is greater than 3.0e6",
             position,
             new_state.position,
-            difference
+            position_difference
         );
     }
     // Known-answer test against JPL Horizons (DE441), retrieved 2026-07-14.
@@ -95,8 +96,7 @@ mod tests {
     // Raw output: test_data/horizons_emb_elements.txt, horizons_emb_vectors.txt.
     // Horizons' "Keplerian GM" = 1.3271284354451501e11 km³/s²,
     //   == MU_SOL + MU_EARTH + MU_LUNA (validates bodies.rs sum).
-    // Observed miss vs DE441: 0.15 m at dt=0; ~3,300–7,700 km over the year
-    //   (two-body assumption cost; tolerance 1e7 m set with headroom).
+    // Observed miss vs DE441: 481882.78918451606m, tolerance set to 500000m
     #[test]
     fn coast_vs_horizons() {
         let initial_state: StateVector = StateVector {
@@ -128,8 +128,8 @@ mod tests {
         });
         let difference: f64 = expected_state.position.distance(new_state.position);
         assert!(
-            difference < 1.0e7,
-            "Difference between expected position {} and derived position {} is {}, which is greater than 1.0e7",
+            difference < 5e5,
+            "Difference between expected position {} and derived position {} is {}, which is greater than 5.0e5",
             expected_state.position,
             new_state.position,
             difference
