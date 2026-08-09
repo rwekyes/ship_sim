@@ -152,10 +152,8 @@ pins stable + components.
 
 ## Current state (as of 2026-08-08)
 
-In flight right now (uncommitted, does not compile — expected):
-`OrbitalElements::position_at_dt` stub in orbits.rs and an `integrate.rs`
-signature-only stub. See "Next up" items 1–2 for the settled design.
-Last green commit: a5b2bd6, 19 sim-core tests.
+Head is afb1f7d, working tree clean, 21 sim-core tests, fmt/clippy/tests
+all green and pushed. `integrate.rs` exists and is the newest module.
 
 
 Done: workspace scaffold, README, MIT license, .gitignore (/target, .idea/,
@@ -275,10 +273,47 @@ RE-SOLVE Kepler from the reconstructed elements' mean anomaly before
 rebuilding the state — reusing the original E puts a circular body at the
 wrong argument of latitude (the bug that stalled test_circular).
 
+`orbits.rs` addition (2026-08-08): `OrbitalElements::position_at_dt(self,
+mu, dt) -> Result<DVec3, KeplerError>` — the convenience chain
+propagate → solve → position. Takes `self` by value (OrbitalElements is
+Copy, so callers keep theirs) and passes `&self` inward. Uses `?` on
+solve_kepler to propagate KeplerError; calls `position_at` directly, NOT
+`elements_to_state_vector` — the vectors.rs import that briefly existed
+here was removed, module split intact. A `state_vector_at_dt` sibling is
+still NOT written; the integrator tests build their initial state via
+`elements_to_state_vector` in the test body instead.
+
+`integrate.rs` — NEW 2026-08-08, first pass COMPLETE, 2 tests green.
+- `two_body(mu, &state) -> DVec3` — `-mu * r / r.length().powi(3)`.
+  The cube is inverse-square PLUS the normalization of r, not
+  inverse-cube gravity. Sign is negative because r runs origin→ship and
+  gravity pulls back down it. Ship mass cancels out of F = GMm/r², which
+  is why this composes by plain addition with commanded-acceleration
+  thrust. Guarded by `debug_assert!(r.is_finite() && r.length() > 1.0)`.
+- `integrate<F>(mut state, t0, dt_total, substep, accel: F) -> StateVector
+  where F: Fn(f64, &StateVector) -> DVec3` — semi-implicit Euler.
+  `n = (dt_total/substep).ceil()`, early return if n == 0.0 (also dodges
+  the h = 0.0/0.0 = NaN case), `h = dt_total/n` so steps are uniform and
+  land exactly on t0 + dt_total. `t` is computed fresh at the TOP of each
+  iteration as `t0 + i as f64 * h` — a loop-local `let`, not an outer
+  `mut` accumulator (avoids drift AND the unused_assignments lint).
+  Guarded by `debug_assert!(dt_total >= 0.0 && substep > 0.0)`.
+- Tests: `integrate_vs_kepler` (integrator vs `position_at_dt` on the
+  same EMB elements — Kepler is the EXACT analytic solution to the ODE
+  being integrated, so the miss is PURE truncation error, isolated and
+  attributable) and `coast_vs_horizons` (end-to-end vs DE441 truth,
+  which conflates two-body model error with truncation — kept as a
+  separate named test precisely so a failure says which layer moved).
+  Both 121.75 d span, 60 s substeps, tolerance 1e7 m.
+- OUTSTANDING: neither test records its OBSERVED miss, which the receipt
+  convention requires. `integrate_vs_kepler`'s 1e7 was inherited from the
+  Horizons test, but its error source is completely different — it may be
+  100× too loose. Measure both before writing test (b).
+
 3D migration (branch adventure-to-the-third-dimension): COMPLETE.
 Checklist items 1–7 plus `Trajectory::from_state` in full 3D all done.
 
-Clippy/fmt/tests all green as of 2026-07-23.
+Clippy/fmt/tests all green as of 2026-08-08 (21 sim-core tests).
 
 Next up, in order (REORDERED 2026-08-08 — the burn integrator was moved
 ahead of the CLI). Rationale: the CLI's command surface is defined by what
@@ -288,42 +323,33 @@ first does not apply here — the integrator has an exact oracle sitting next
 to it in orbits.rs (turn thrust off, it must reproduce Kepler propagation),
 so no plot and no new Horizons pull is needed to validate it.
 
-1. `OrbitalElements::position_at_dt(&self, mu, dt) -> Result<DVec3,
-   KeplerError>` chaining propagate → solve → position. Must return
-   Result — solve_kepler can fail and sim-core does not panic on data.
-   A `state_vector_at_dt` sibling too; the integrator tests want velocity.
-   IN PROGRESS as of 2026-08-08. Call `position_at` directly, NOT
-   `elements_to_state_vector` — that lives in vectors.rs and calling it
-   from orbits.rs inverts the module split AND computes a velocity that
-   gets thrown away.
-2. `integrate.rs` (NEW module — stepper + acceleration terms; burns.rs
-   keeps Burn/thrust/planner). Decided 2026-08-08 against putting the
-   stepper in burns.rs, because the pinned perturbation feature calls it
-   for pure coasting and "burns" would mislabel it. Signature:
-   `integrate<F>(state, t0, dt_total, substep, accel: F) -> StateVector
-   where F: Fn(f64, &StateVector) -> DVec3`, plus
-   `two_body(mu, &state) -> DVec3`. Generic `Fn` bound (monomorphized,
-   closures compose as `|t, s| two_body(mu, s) + burn.accel_at(epoch, t)`)
-   rather than a trait — the trait is the upgrade path when the
-   perturbation work needs a stateful, configurable model. t0 is seconds
-   since the elements' epoch; keep Epoch out of integrate.rs entirely,
-   same as orbits.rs. Uniform substeps: n = ceil(dt_total/substep),
-   h = dt_total/n — no ragged remainder, the convergence test needs it.
-   debug_assert r is not near zero in two_body.
-   Tests, in order of what they catch:
-   a. Zero-thrust coast vs. Kepler (analytic oracle, no new data).
+DONE 2026-08-08: `position_at_dt` (item 1) and `integrate.rs` first pass
+with test (a) in both flavours (item 2) — see the Current state section.
+
+1. Measure and record the observed miss for `integrate_vs_kepler` and
+   `coast_vs_horizons`, then re-set their tolerances from the measurement.
+   Both currently sit at an inherited 1e7 m with no recorded receipt,
+   which breaks the convention every other test in this repo follows.
+   `cargo test -- --nocapture` shows nothing on a PASS, so measure by
+   temporarily tightening the tolerance until it fails and reading the
+   miss out of the panic message.
+2. Remaining integrator tests, in order of what they catch:
    b. Step-size convergence: halve substep, error halves (Euler is
       first-order). Proves the scheme is what you think it is — a subtly
       wrong stepper still converges, just at the wrong rate. Also
       quantifies when RK4 becomes necessary; that measurement decides it,
-      not a hunch.
+      not a hunch. Run it against `integrate_vs_kepler`'s setup, never
+      `coast_vs_horizons` — convergence is only a clean signal when the
+      error is pure truncation.
    c. Energy bound over many orbits — catches the forward-Euler ordering
       slip. ZERO-THRUST ONLY: symplectic requires a separable Hamiltonian,
       and constant inertial thrust is an external force. Asserting this on
       a thrusting state means chasing physics as if it were a bug.
    d. Pure kinematics, μ=0, constant accel vs. r₀+v₀t+½at². Euler carries
       a ½a·dt·t bias, so assert with tolerance — the residual is expected,
-      not a bug.
+      not a bug. NOTE μ=0 means `two_body` is not the accel fn here (its
+      debug_assert is fine, but the term is identically zero) — pass a
+      constant-vector closure instead.
    Estimated Euler cost at 60 s substeps: negligible over a multi-day burn
    (thousands of steps); order 10⁴ km/yr along-track drift over year-long
    coasts, i.e. the same ballpark as the two-body error already accepted.
@@ -416,3 +442,42 @@ so no plot and no new Horizons pull is needed to validate it.
   solution's own epoch) in the HEADER — transcribe from the $$SOE table
   rows, not the header block. Provenance is a JPL#N solution ID, not a
   DE ephemeris number.
+- **Passing `two_body` bare to `integrate` COMPILES AND IS SILENTLY
+  WRONG** (verified 2026-08-08). `two_body` is
+  `fn(f64, &StateVector) -> DVec3`; the bound is
+  `Fn(f64, &StateVector) -> DVec3`. Structurally identical, so the
+  compiler accepts it — but the leading f64 means μ to one and t to the
+  other, so gravity gets scaled by the elapsed second count. No error, no
+  warning, wildly wrong answers. ALWAYS go through the closure:
+  `|_t, s| two_body(mu, s)`. The types match; the meanings do not.
+- Closures: `two_body(mu, &state)` CALLS it and yields a DVec3;
+  `|_t, s| two_body(mu, s)` passes a recipe to be re-run at each new
+  position. The integrator needs the recipe — acceleration changes as the
+  ship moves. The closure is also where captured config (μ) lives, which
+  is precisely why a plain `fn` cannot do the job: a fn has no
+  environment, so there is nowhere to put μ.
+- Unused CLOSURE parameters trip `unused_variables` exactly like function
+  ones, and CI is `-D warnings` — gravity ignores time, so it is `_t`.
+- `unused_assignments` ("value assigned to `t` is never read") is NOT
+  `unused_variables`. It means the INITIAL value is dead, typically from
+  keeping an outer `let mut t = t0;` while reassigning at the top of the
+  loop. Fix by deleting the outer binding and making it a loop-local
+  `let` — which also kills the accumulated-rounding question for free.
+- Float→int `as` casts SATURATE, they do not panic, and NaN casts to 0.
+  Measured for `(dt_total/substep).ceil() as u32`: negative → 0 and
+  NaN → 0 (both a SILENT no-op that looks exactly like a correct
+  zero-length step), substep 0.0 → inf → u32::MAX → 4.3 billion
+  iterations at h=0, i.e. a hang. All four are why `integrate` guards its
+  span with a debug_assert; `NaN >= 0.0` is false so one comparison
+  catches NaN too, same trick as the `two_body` guard.
+- `clippy::excessive_precision` on a Horizons literal is almost always a
+  TRAILING ZERO (bitten three times now: MU_SOL, the vectors.rs velocity,
+  the integrate.rs fixture). f64 holds ~15–17 significant digits; the
+  trailing zero changes no bits, so trim it. Faster fix: the de-zeroed
+  EMB values already exist in `vectors.rs` `test_earth_round_trip` —
+  copy from there rather than re-editing raw Horizons output. Take the
+  digit trim, not clippy's underscore-separated suggestion; the rest of
+  the repo uses the plain form.
+- A test that PASSES prints nothing, so `--nocapture` will not show you a
+  miss you want to record. To measure it, tighten the tolerance until the
+  assert fails and read the number out of the panic message.
