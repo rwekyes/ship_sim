@@ -3,6 +3,7 @@ use glam::DVec3;
 
 pub fn two_body(mu: f64, state: &StateVector) -> DVec3 {
     let r = state.position;
+    debug_assert!(r.is_finite() && r.length() > 1.0, "two_body: bad position {r:?}");
     -mu * r / r.length().powi(3)
 }
 pub fn integrate<F>(
