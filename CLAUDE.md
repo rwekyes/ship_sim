@@ -52,12 +52,39 @@ cargo member unless WASM.
 - **Store Keplerian orbital elements, not position tables.** Position at time
   t computed on demand: mean anomaly → Kepler's equation (Newton iteration) →
   eccentric anomaly → true anomaly → position. Coasting bodies are free.
-- **Numerical integration only for ships under thrust.** Semi-implicit Euler
-  first, RK4 later. Burns subdivide internally (~60s substeps) within the
-  12h/24h game timesteps. After a burn, convert state vector back to elements.
+- **Burn PLANNER and burn INTEGRATOR are two different pieces of code**
+  (settled 2026-08-08 — these were previously one confused bullet).
+  The *planner* answers "how long do I burn, when do I flip, how much Δv"
+  and is closed-form kinematics; this is where "at sustained ~0.3g solar
+  gravity is negligible for powered legs" applies. The *integrator*
+  answers "given thrust, where is the ship at t+dt" and its acceleration
+  is ALWAYS gravity + thrust, never thrust alone. Do not write a
+  thrust-only kinematic stepper: the pinned perturbation feature reuses
+  the integrator for pure coasting, which is only possible if the
+  acceleration term is pluggable.
 - **Expanse travel = brachistochrone burns** (accelerate, flip, decelerate).
-  At sustained ~0.3g, solar gravity is negligible for powered legs — the burn
-  solver can be pure kinematics; orbital mechanics applies to coasting.
+  Orbital mechanics applies to coasting.
+- **Numerical integration only for ships under thrust** (plus the pinned
+  perturbed-coast feature). Semi-implicit Euler first, RK4 later. Burns
+  subdivide internally (~60s substeps) within the 12h/24h game timesteps.
+  After a burn, convert state vector back to elements via
+  `Trajectory::from_state`. Semi-implicit ordering is `v += a·dt` FIRST,
+  then `r += v_new·dt` — using the old v is plain forward Euler and gains
+  energy secularly (orbits spiral outward). It passes short-burn tests and
+  fails long coasts; the energy-bound test below is what catches it.
+- **Thrust is commanded ACCELERATION, not force + mass** (settled
+  2026-08-08). Expanse ships are specified as "burning at a third of a g"
+  and players talk that way. Force/mass drags propellant mass in as a
+  state variable and makes the ODE non-separable for no gameplay gain.
+  Fuel burn can ride alongside later as a decoupled scalar
+  (ṁ = m·a/(g₀·Isp) at constant commanded accel) without feeding back
+  into the dynamics.
+- **Thrust direction is a fixed inertial DVec3** for now (settled
+  2026-08-08), normalized on construction, not per substep. That is
+  physically what a brachistochrone leg does — hold one inertial heading.
+  A direction-policy enum (Prograde/TowardPoint/…) is the upgrade path,
+  but note it makes acceleration velocity-dependent and forfeits the
+  symplectic property the energy test relies on.
 - **Full 3D** (decided 2026-07-15, branch adventure-to-the-third-dimension;
   supersedes "2D first"). The 2D fold (i=0, Ω into ω) cost more than it
   saved — retrograde/inclination questions kept leaking in. DVec3
@@ -123,7 +150,13 @@ cargo member unless WASM.
 `cargo test --workspace`. Warnings are errors in CI. rust-toolchain.toml
 pins stable + components.
 
-## Current state (as of 2026-07-23)
+## Current state (as of 2026-08-08)
+
+In flight right now (uncommitted, does not compile — expected):
+`OrbitalElements::position_at_dt` stub in orbits.rs and an `integrate.rs`
+signature-only stub. See "Next up" items 1–2 for the settled design.
+Last green commit: a5b2bd6, 19 sim-core tests.
+
 
 Done: workspace scaffold, README, MIT license, .gitignore (/target, .idea/,
 data/*.db), rust-toolchain.toml, CI green, workspace inheritance wired,
@@ -247,10 +280,64 @@ Checklist items 1–7 plus `Trajectory::from_state` in full 3D all done.
 
 Clippy/fmt/tests all green as of 2026-07-23.
 
-Next up, in order:
-1. Convenience entry point chaining propagate → solve → position, then
-   the CLI plot/solve commands.
-2. PINNED FEATURE (2026-07-17, wanted after the thrust integrator):
+Next up, in order (REORDERED 2026-08-08 — the burn integrator was moved
+ahead of the CLI). Rationale: the CLI's command surface is defined by what
+sim-core can do, so building a coast-only nav CLI means building it twice.
+The usual "I need to see numbers to debug the physics" argument for a CLI
+first does not apply here — the integrator has an exact oracle sitting next
+to it in orbits.rs (turn thrust off, it must reproduce Kepler propagation),
+so no plot and no new Horizons pull is needed to validate it.
+
+1. `OrbitalElements::position_at_dt(&self, mu, dt) -> Result<DVec3,
+   KeplerError>` chaining propagate → solve → position. Must return
+   Result — solve_kepler can fail and sim-core does not panic on data.
+   A `state_vector_at_dt` sibling too; the integrator tests want velocity.
+   IN PROGRESS as of 2026-08-08. Call `position_at` directly, NOT
+   `elements_to_state_vector` — that lives in vectors.rs and calling it
+   from orbits.rs inverts the module split AND computes a velocity that
+   gets thrown away.
+2. `integrate.rs` (NEW module — stepper + acceleration terms; burns.rs
+   keeps Burn/thrust/planner). Decided 2026-08-08 against putting the
+   stepper in burns.rs, because the pinned perturbation feature calls it
+   for pure coasting and "burns" would mislabel it. Signature:
+   `integrate<F>(state, t0, dt_total, substep, accel: F) -> StateVector
+   where F: Fn(f64, &StateVector) -> DVec3`, plus
+   `two_body(mu, &state) -> DVec3`. Generic `Fn` bound (monomorphized,
+   closures compose as `|t, s| two_body(mu, s) + burn.accel_at(epoch, t)`)
+   rather than a trait — the trait is the upgrade path when the
+   perturbation work needs a stateful, configurable model. t0 is seconds
+   since the elements' epoch; keep Epoch out of integrate.rs entirely,
+   same as orbits.rs. Uniform substeps: n = ceil(dt_total/substep),
+   h = dt_total/n — no ragged remainder, the convergence test needs it.
+   debug_assert r is not near zero in two_body.
+   Tests, in order of what they catch:
+   a. Zero-thrust coast vs. Kepler (analytic oracle, no new data).
+   b. Step-size convergence: halve substep, error halves (Euler is
+      first-order). Proves the scheme is what you think it is — a subtly
+      wrong stepper still converges, just at the wrong rate. Also
+      quantifies when RK4 becomes necessary; that measurement decides it,
+      not a hunch.
+   c. Energy bound over many orbits — catches the forward-Euler ordering
+      slip. ZERO-THRUST ONLY: symplectic requires a separable Hamiltonian,
+      and constant inertial thrust is an external force. Asserting this on
+      a thrusting state means chasing physics as if it were a bug.
+   d. Pure kinematics, μ=0, constant accel vs. r₀+v₀t+½at². Euler carries
+      a ½a·dt·t bias, so assert with tolerance — the residual is expected,
+      not a bug.
+   Estimated Euler cost at 60 s substeps: negligible over a multi-day burn
+   (thousands of steps); order 10⁴ km/yr along-track drift over year-long
+   coasts, i.e. the same ballpark as the two-body error already accepted.
+   Test (b) pins the real number.
+3. `burns.rs`: `Burn { start: Epoch, duration, accel, direction }` +
+   `accel_at(reference, t) -> DVec3`, zero outside the window. The Epoch →
+   f64-seconds boundary lives HERE, not in integrate.rs. Normalize
+   direction in a constructor (parse-don't-validate; a non-unit direction
+   silently scales thrust).
+4. The burn planner (closed-form; solve flip time / duration / Δv for a
+   target). Deferred deliberately — it needs a trustworthy integrator to
+   check against, and it does not need to exist for 1–3 to be correct.
+5. CLI plot/solve commands.
+6. PINNED FEATURE (2026-07-17, wanted after the thrust integrator):
    perturbed-coast propagation via special perturbations — reuse the
    powered-flight numerical integrator with acceleration = solar
    two-body + Σ over perturbers of μ_k·(direct − indirect) terms;
