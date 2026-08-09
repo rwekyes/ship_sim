@@ -140,7 +140,7 @@ mod tests {
     // Difference of 2.932713723m
     // Confirms
     #[test]
-    fn step_size_convergence(){
+    fn step_size_convergence() {
         let mu = MU_SOL + MU_EARTH + MU_LUNA;
         let elements = OrbitalElements {
             semi_major_axis: 1.495973362233347e8 * 1000f64, // km conversion
