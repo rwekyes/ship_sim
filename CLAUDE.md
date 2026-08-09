@@ -138,6 +138,22 @@ cargo member unless WASM.
   (e.g., propagate Earth 365.25 days, assert within tolerance). Kepler
   solver edge cases: M=0 → E=0; e=0 → E=M. Round-trip tests for
   elements ↔ state-vector conversions. CI runs cargo test --workspace.
+- **Test DRY rule (settled 2026-08-09): duplicate assertions and expected
+  values; extract fixtures and setup.** An expected value computed by a
+  shared helper can hide a bug — the helper's error cancels the code's and
+  the test goes green while lying. So known-answer data (Horizons vectors)
+  stays literal and local in each test, even across several tests. Setup
+  with no assertion semantics — transcribed element structs, "build state,
+  integrate, measure" plumbing — gets a helper, because a re-transcription
+  that updates one copy and not the other makes two tests silently disagree
+  about what orbit they are testing. Applied in `integrate.rs`:
+  `emb_j2000_elements` / `kepler_miss` extracted, `coast_vs_horizons`
+  vectors left inline.
+- **Prefer asserting a RELATIONSHIP over a second absolute tolerance** when
+  the claim is about a relationship. A convergence test that just asserts
+  `miss < some_number` at a smaller step is a second magnitude test wearing
+  the wrong name — it passes at 0.66× the error, which would mean the
+  scheme is not first-order. Assert the ratio.
 - **Commits:** conventional-commit style (feat:, fix:, chore:).
 - Any `#![allow(dead_code)]` present is temporary scaffolding mute — remove
   as modules gain real callers; don't add more without asking.
@@ -150,10 +166,12 @@ cargo member unless WASM.
 `cargo test --workspace`. Warnings are errors in CI. rust-toolchain.toml
 pins stable + components.
 
-## Current state (as of 2026-08-08)
+## Current state (as of 2026-08-09)
 
-Head is afb1f7d, working tree clean, 21 sim-core tests, fmt/clippy/tests
-all green and pushed. `integrate.rs` exists and is the newest module.
+Head is dced990, working tree clean, 22 sim-core tests, all passing and
+pushed — but **clippy is RED on this commit** (`manual_range_contains` on
+the convergence-test band, `integrate.rs:125`), so CI is failing. One-line
+fix: `(0.48..=0.52).contains(&ratio)`. `integrate.rs` is the newest module.
 
 
 Done: workspace scaffold, README, MIT license, .gitignore (/target, .idea/,
@@ -283,7 +301,8 @@ here was removed, module split intact. A `state_vector_at_dt` sibling is
 still NOT written; the integrator tests build their initial state via
 `elements_to_state_vector` in the test body instead.
 
-`integrate.rs` — NEW 2026-08-08, first pass COMPLETE, 2 tests green.
+`integrate.rs` — NEW 2026-08-08, first pass COMPLETE, 3 tests passing
+(tests (a) and (b) of the plan; (c) and (d) still to write).
 - `two_body(mu, &state) -> DVec3` — `-mu * r / r.length().powi(3)`.
   The cube is inverse-square PLUS the normalization of r, not
   inverse-cube gravity. Sign is negative because r runs origin→ship and
@@ -298,22 +317,41 @@ still NOT written; the integrator tests build their initial state via
   iteration as `t0 + i as f64 * h` — a loop-local `let`, not an outer
   `mut` accumulator (avoids drift AND the unused_assignments lint).
   Guarded by `debug_assert!(dt_total >= 0.0 && substep > 0.0)`.
-- Tests: `integrate_vs_kepler` (integrator vs `position_at_dt` on the
-  same EMB elements — Kepler is the EXACT analytic solution to the ODE
-  being integrated, so the miss is PURE truncation error, isolated and
-  attributable) and `coast_vs_horizons` (end-to-end vs DE441 truth,
-  which conflates two-body model error with truncation — kept as a
-  separate named test precisely so a failure says which layer moved).
-  Both 121.75 d span, 60 s substeps, tolerance 1e7 m.
-- OUTSTANDING: neither test records its OBSERVED miss, which the receipt
-  convention requires. `integrate_vs_kepler`'s 1e7 was inherited from the
-  Horizons test, but its error source is completely different — it may be
-  100× too loose. Measure both before writing test (b).
+- Tests, all on a 121.75 d span (175,320 min), all with receipts recorded
+  2026-08-09:
+  - `integrate_vs_kepler` — integrator vs `position_at_dt` on the same EMB
+    elements. Kepler is the EXACT analytic solution to the ODE being
+    integrated, so the miss is PURE truncation error, isolated and
+    attributable. 60 s substeps, observed miss 2,861,969.42 m, tolerance
+    3e6.
+  - `coast_vs_horizons` — end-to-end vs DE441 truth, which conflates
+    two-body model error with truncation; kept as a separate named test
+    precisely so a failure says which layer moved. 60 s substeps, observed
+    miss 481,882.79 m, tolerance 5e5. NOTE it is SMALLER than the pure
+    truncation miss above — the two error sources partly cancel here, so
+    this test is not a bound on either one alone. That is exactly why both
+    exist.
+  - `step_size_convergence` — test (b). Asserts the RATIO
+    `kepler_miss(30.0) / kepler_miss(60.0)` lands in 0.48..=0.52, not a
+    second absolute tolerance. Observed ratio 0.5000010 (1,430,987.64 m
+    vs half of 2,861,969.42 = 1,430,984.71, off by 2.93 m) — ~40×
+    headroom inside the band, while a second-order scheme (0.25) or a
+    broken one (→1.0) fails loudly.
+- Test-module helpers (extracted 2026-08-09, commit dced990):
+  `emb_j2000_elements() -> OrbitalElements` (the transcribed JPL fixture)
+  and `kepler_miss(substep: f64) -> f64` (build state → integrate →
+  distance vs `position_at_dt`). Extracted because the two Kepler-oracle
+  tests are the SAME experiment at two step sizes; duplicating transcribed
+  Horizons data across tests is the failure mode this repo has already been
+  bitten by three ways. `coast_vs_horizons` deliberately keeps its expected
+  vectors inline and does NOT use the helpers — see the testing convention
+  below.
 
 3D migration (branch adventure-to-the-third-dimension): COMPLETE.
 Checklist items 1–7 plus `Trajectory::from_state` in full 3D all done.
 
-Clippy/fmt/tests all green as of 2026-08-08 (21 sim-core tests).
+Tests green as of 2026-08-09 (22 sim-core tests); clippy RED, see the top
+of this section.
 
 Next up, in order (REORDERED 2026-08-08 — the burn integrator was moved
 ahead of the CLI). Rationale: the CLI's command surface is defined by what
@@ -325,22 +363,17 @@ so no plot and no new Horizons pull is needed to validate it.
 
 DONE 2026-08-08: `position_at_dt` (item 1) and `integrate.rs` first pass
 with test (a) in both flavours (item 2) — see the Current state section.
+DONE 2026-08-09: tolerance receipts (old item 1) and test (b),
+`step_size_convergence`. Euler's first order is now CONFIRMED, not assumed:
+measured ratio 0.5000010. Consequence for the RK4 decision — halving the
+substep buys exactly one halving of error, so 60 s → 1 s (60× the compute)
+only buys 60×, leaving ~48 km of truncation over 121.75 d. Euler is fine
+for burns (hours, not months); RK4 is what the pinned perturbed-coast
+feature will need, not the burn integrator.
 
-1. Measure and record the observed miss for `integrate_vs_kepler` and
-   `coast_vs_horizons`, then re-set their tolerances from the measurement.
-   Both currently sit at an inherited 1e7 m with no recorded receipt,
-   which breaks the convention every other test in this repo follows.
-   `cargo test -- --nocapture` shows nothing on a PASS, so measure by
-   temporarily tightening the tolerance until it fails and reading the
-   miss out of the panic message.
+0. FIRST: fix clippy on `integrate.rs:125` —
+   `(0.48..=0.52).contains(&ratio)`. CI is red until this lands.
 2. Remaining integrator tests, in order of what they catch:
-   b. Step-size convergence: halve substep, error halves (Euler is
-      first-order). Proves the scheme is what you think it is — a subtly
-      wrong stepper still converges, just at the wrong rate. Also
-      quantifies when RK4 becomes necessary; that measurement decides it,
-      not a hunch. Run it against `integrate_vs_kepler`'s setup, never
-      `coast_vs_horizons` — convergence is only a clean signal when the
-      error is pure truncation.
    c. Energy bound over many orbits — catches the forward-Euler ordering
       slip. ZERO-THRUST ONLY: symplectic requires a separable Hamiltonian,
       and constant inertial thrust is an external force. Asserting this on
@@ -478,6 +511,16 @@ with test (a) in both flavours (item 2) — see the Current state section.
   copy from there rather than re-editing raw Horizons output. Take the
   digit trim, not clippy's underscore-separated suggestion; the rest of
   the repo uses the plain form.
+- `cargo test` passing does NOT mean CI passes — clippy is a separate gate
+  and CI is `-D warnings` (bitten 2026-08-09: `dced990` pushed green tests
+  with a red `manual_range_contains`). Run
+  `cargo clippy --workspace --all-targets -- -D warnings` before pushing,
+  not just `cargo test`. Note `--all-targets` is what makes clippy look
+  inside `#[cfg(test)]` modules at all; without it a lint in a test module
+  is invisible locally and only appears in CI.
+- `clippy::manual_range_contains`: a two-sided bound written
+  `x >= lo && x <= hi` is a lint, not a style preference — CI rejects it.
+  Write `(lo..=hi).contains(&x)`. Common in tolerance-band asserts.
 - A test that PASSES prints nothing, so `--nocapture` will not show you a
   miss you want to record. To measure it, tighten the tolerance until the
   assert fails and read the number out of the panic message.
