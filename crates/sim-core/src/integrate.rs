@@ -127,6 +127,35 @@ mod tests {
             ratio
         );
     }
+    // Observed drift at 100 orbits: 0.000012799725102110242
+    // Swapping velocity and position updates caused drift: 0.35356232799608484
+    #[test]
+    fn energy_bound() {
+        let mu = MU_SOL + MU_EARTH + MU_LUNA;
+        let elements = emb_j2000_elements();
+        let ecc_anomaly = solve_kepler(elements.mean_anomaly_epoch, elements.eccentricity).unwrap();
+        let mut state = elements_to_state_vector(&elements, mu, ecc_anomaly);
+        let epsilon_0 = specific_energy(mu, &state);
+        let mut max: f64 = 0.0;
+        let mut t0: f64 = 0.0;
+        let dt = 3.155798e7 / 20.0;
+        for _ in 0..2000 {
+            state = integrate(state, 0.0, dt, 3600.0, |_t, s| two_body(mu, s));
+            t0 += dt;
+            let epsilon = specific_energy(mu, &state);
+            let difference = epsilon - epsilon_0;
+            let drift = difference.abs() / epsilon_0.abs();
+            if drift > max {
+                max = drift;
+            }
+        }
+        assert!(
+            max < 2e-5,
+            "max {} above threshold 2e-5, time elapsed {} seconds",
+            max,
+            t0
+        )
+    }
     // Helper returns J2000 elements for EMB
     fn emb_j2000_elements() -> OrbitalElements {
         OrbitalElements {
@@ -151,5 +180,13 @@ mod tests {
 
         let position = elements.position_at_dt(mu, 175320.0 * 60.0).unwrap();
         new_state.position.distance(position)
+    }
+    // helper computes specific energy
+    fn specific_energy(mu: f64, state: &StateVector) -> f64 {
+        let r = state.position;
+        let r_len = r.length();
+        let v = state.velocity;
+        let v_len_sqr = v.length_squared();
+        (v_len_sqr / 2.0) - (mu / r_len)
     }
 }
