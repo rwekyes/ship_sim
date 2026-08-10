@@ -57,7 +57,6 @@ mod tests {
     use crate::orbits::{OrbitalElements, solve_kepler};
     use crate::time::J2000;
     use crate::vectors::elements_to_state_vector;
-    use std::f64::consts::TAU;
 
     // Test the integrator vs the Kepler propagation
     // Observed miss: 2861969.4202166707m in 1/4 orbit for Earth, tolerance set to 3000000m
