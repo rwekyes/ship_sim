@@ -151,6 +151,41 @@ mod tests {
         }
         assert!(max < 2e-5, "max {} above threshold 2e-5", max)
     }
+    // Pure acceleration, mu = 0
+    // For a = 0.33, -2.1, 7.7, dt = 333, substep = 13
+    // observed residual  = 3.0517578125222045e-05
+    // ULP at y=1.4469e11 = 3.0517578125e-05
+    #[test]
+    fn pure_kinematics() {
+        let a = DVec3::new(0.33, -2.1, 7.7);
+        let state = StateVector {
+            position: DVec3::new(
+                -2.65025768897131e7,
+                1.44693955627991e8,
+                -1.704331902042031e2,
+            ) * 1e3,
+            velocity: DVec3::new(0.2, 9.9, 5.3),
+        };
+        let dt: f64 = 333.0;
+        let substep = 13.0;
+        let n = (dt / substep).ceil();
+        let h = dt / n;
+        let final_state = integrate(state, 0.0, dt, substep, |_t, _s| a);
+        let expected_position =
+            state.position + state.velocity * dt + 0.5 * a * dt.powi(2) + 0.5 * a * h * dt;
+        let residual = final_state.position.distance(expected_position);
+        assert!(
+            residual < 3.052e-5,
+            "residual {} is above tolerance 3.052e-5",
+            residual
+        );
+        let velocity_difference = final_state.velocity.distance(state.velocity + a * dt);
+        assert!(
+            velocity_difference < 1e-9,
+            "velocity difference {} is above tolerance 1e-9",
+            velocity_difference
+        );
+    }
     // Helper returns J2000 elements for EMB
     fn emb_j2000_elements() -> OrbitalElements {
         OrbitalElements {
