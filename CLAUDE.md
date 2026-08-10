@@ -168,10 +168,13 @@ pins stable + components.
 
 ## Current state (as of 2026-08-09)
 
-Head is 41d6d8f, working tree clean, 23 sim-core tests, fmt/clippy/tests
-all green locally (full CI gate run, not just `cargo test`).
-`integrate.rs` is the newest module; tests (a), (b) and (c) of the
-integrator plan are done, (d) remains.
+Head is ee818ad plus an UNCOMMITTED `integrate.rs` carrying test (d),
+`pure_kinematics`. 24 sim-core tests, fmt/clippy/tests all green locally
+(full CI gate run, not just `cargo test`). `integrate.rs` is the newest
+module and roadmap item 2 is now COMPLETE — the integrator is validated
+four independent ways: an exact analytic oracle (a), a convergence rate
+(b), a conservation law (c), and a closed-form error model (d).
+Next real work is `burns.rs`.
 
 
 Done: workspace scaffold, README, MIT license, .gitignore (/target, .idea/,
@@ -316,8 +319,8 @@ expression.
   `mean_motion`. Move it. Neither new method has a doc comment yet, which
   breaks the file's convention that every pub fn carries one.
 
-`integrate.rs` — NEW 2026-08-08, first pass COMPLETE, 4 tests passing
-(tests (a), (b) and (c) of the plan; (d) still to write).
+`integrate.rs` — NEW 2026-08-08, COMPLETE, 4 tests passing — the full
+(a)/(b)/(c)/(d) set from the plan.
 - `two_body(mu, &state) -> DVec3` — `-mu * r / r.length().powi(3)`.
   The cube is inverse-square PLUS the normalization of r, not
   inverse-cube gravity. Sign is negative because r runs origin→ship and
@@ -367,6 +370,36 @@ expression.
     - `t0` accumulates across chunks and is passed into `integrate`. It is
       a no-op today (gravity ignores t) and exists so the pattern is right
       before `burns.rs` makes it load-bearing.
+  - `pure_kinematics` — test (d), added 2026-08-09. μ = 0, acceleration is
+    a constant-vector closure `|_t, _s| a` (NOT `two_body` — the term is
+    identically zero and there is nowhere to put μ in a bare fn anyway).
+    Not a tolerance test: semi-implicit Euler's error for constant accel is
+    EXACT and closed-form, so the test asserts the full expression
+    `r_N = r0 + v0*t + 0.5*a*t^2 + 0.5*a*h*t`. That last term is the Euler
+    bias; it is proportional to h, which is why the test must recompute
+    `h = dt/ceil(dt/substep)` rather than assume `h == substep`.
+    Inputs deliberately awkward: `a = (0.33, -2.1, 7.7)` non-axis-aligned,
+    `v0 = (0.2, 9.9, 5.3)` all-nonzero (so the `v0*t` term is actually
+    exercised), `dt = 333` / `substep = 13` which does NOT divide evenly —
+    that combination is the only coverage the `ceil` path has.
+    Observed position residual 3.0517578125222045e-5 m, which is EXACTLY
+    one ULP at the y coordinate (1.4469e11, ULP = 2^-15 = 3.0517578125e-5).
+    The closed form reproduces the integrator bit-for-bit; the residual is
+    the float floor, not an approximation.
+    Velocity is separately asserted: for constant accel `v_N = v0 + a*t`
+    with NO bias term — the correction lands only on position. Observed
+    9.183e-13 m/s against a 1e-9 tolerance.
+    - OUTSTANDING: the position tolerance is set to 3.052e-5, i.e. 1.00008×
+      the observed value — no headroom at all. Two ULP (6.1e-5) fails, and
+      a release build's FMA contraction or a larger fixture coordinate
+      would get there. Widen to 1e-4 (~3 ULP), still nine orders inside the
+      1,000 km budget. Same knife-edge mistake as the first `energy_bound`
+      threshold; see the loop-bound tolerance gotcha below.
+    - Bonus guard, not yet recorded as a receipt: forward Euler flips the
+      bias SIGN, so the two schemes differ by exactly `a*h*t` = 34,068.7 m
+      here. This test discriminates the statement ordering by nine orders
+      of magnitude — a sharper signal than `energy_bound` gives, because
+      the expected value is exact rather than a bound.
 - Test-module helpers (extracted 2026-08-09, commit dced990):
   `emb_j2000_elements() -> OrbitalElements` (the transcribed JPL fixture)
   and `kepler_miss(substep: f64) -> f64` (build state → integrate →
@@ -383,7 +416,7 @@ expression.
 3D migration (branch adventure-to-the-third-dimension): COMPLETE.
 Checklist items 1–7 plus `Trajectory::from_state` in full 3D all done.
 
-fmt/clippy/tests all green as of 2026-08-09 (23 sim-core tests).
+fmt/clippy/tests all green as of 2026-08-09 (24 sim-core tests).
 
 Next up, in order (REORDERED 2026-08-08 — the burn integrator was moved
 ahead of the CLI). Rationale: the CLI's command surface is defined by what
@@ -407,17 +440,16 @@ DONE 2026-08-09: test (c), `energy_bound`, plus the `mean_motion`/`period`
 extraction it motivated. The integrator is now confirmed symplectic by
 measurement (bounded energy oscillation, flat over 400 orbits), not by
 inspection of the statement order.
-
-2. Remaining integrator tests:
-   d. Pure kinematics, μ=0, constant accel vs. r₀+v₀t+½at². Euler carries
-      a ½a·dt·t bias, so assert with tolerance — the residual is expected,
-      not a bug. NOTE μ=0 means `two_body` is not the accel fn here (its
-      debug_assert is fine, but the term is identically zero) — pass a
-      constant-vector closure instead.
-   Estimated Euler cost at 60 s substeps: negligible over a multi-day burn
+DONE 2026-08-09: test (d), `pure_kinematics`. Roadmap item 2 is COMPLETE.
+The plan called for asserting with a tolerance because "Euler carries a
+½a·h·t bias"; that undersold it — for constant acceleration the bias is
+EXACT, so (d) became a closed-form known-answer test hitting one ULP
+rather than a loose sanity check. Only remaining chore is widening its
+position tolerance (see the OUTSTANDING note in the Current state section).
+   Measured Euler cost at 60 s substeps: negligible over a multi-day burn
    (thousands of steps); order 10⁴ km/yr along-track drift over year-long
    coasts, i.e. the same ballpark as the two-body error already accepted.
-   Test (b) pins the real number.
+   Test (b) pinned the real number.
 3. `burns.rs`: `Burn { start: Epoch, duration, accel, direction }` +
    `accel_at(reference, t) -> DVec3`, zero outside the window. The Epoch →
    f64-seconds boundary lives HERE, not in integrate.rs. Normalize
@@ -555,6 +587,19 @@ inspection of the statement order.
   period. Diagnostic that separates the two: fine-sample and check whether
   the AMPLITUDE is flat in time — bounded amplitude with a growing
   stroboscopic reading is phase walk, not drift.
+- **An absolute tolerance cannot go below one ULP of the largest coordinate
+  involved**, and ULP scales with magnitude: at 1.45e11 m one ULP is
+  3.05e-5 m, at 1 AU-ish scale generally ~1e-5 m. `pure_kinematics` lands
+  exactly on that floor. Two consequences: a residual equal to 1 ULP means
+  the formula is EXACT (not "close"), and a tolerance set at the observed
+  value has zero headroom because the next representable value up is 2×.
+  Set such tolerances at a few ULP, never at the measurement.
+- Receipts are for setting tolerances WITH headroom, not for setting them
+  AT the observation (bitten twice now: `energy_bound`'s first threshold at
+  7%, `pure_kinematics` at 1.00008×). Measure, then round up a few×. The
+  repo's other tolerances run 1.4× (Horizons), 3.3× (ULP-floor tests) and
+  40× (convergence ratio) — pick by how stable the quantity is, and treat
+  anything under ~2× as a future false failure.
 - A tolerance on a quantity that grows with a loop bound is a trap: the
   one-sample-per-orbit `energy_bound` had 7% headroom and would have failed
   at 108 orbits, blaming the physics for a threshold problem. Prefer
