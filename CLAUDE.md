@@ -168,10 +168,10 @@ pins stable + components.
 
 ## Current state (as of 2026-08-09)
 
-Head is dced990, working tree clean, 22 sim-core tests, all passing and
-pushed — but **clippy is RED on this commit** (`manual_range_contains` on
-the convergence-test band, `integrate.rs:125`), so CI is failing. One-line
-fix: `(0.48..=0.52).contains(&ratio)`. `integrate.rs` is the newest module.
+Head is 41d6d8f, working tree clean, 23 sim-core tests, fmt/clippy/tests
+all green locally (full CI gate run, not just `cargo test`).
+`integrate.rs` is the newest module; tests (a), (b) and (c) of the
+integrator plan are done, (d) remains.
 
 
 Done: workspace scaffold, README, MIT license, .gitignore (/target, .idea/,
@@ -301,8 +301,23 @@ here was removed, module split intact. A `state_vector_at_dt` sibling is
 still NOT written; the integrator tests build their initial state via
 `elements_to_state_vector` in the test body instead.
 
-`integrate.rs` — NEW 2026-08-08, first pass COMPLETE, 3 tests passing
-(tests (a) and (b) of the plan; (c) and (d) still to write).
+`orbits.rs` addition (2026-08-09): `OrbitalElements::mean_motion(self, mu)
+-> f64` = `(mu / a³).sqrt()`, and `OrbitalElements::period(self, mu) -> f64`
+= `TAU / mean_motion`. Kepler's third law, one home. `mean_motion` was
+previously written inline in TWO places — `propagate_mean_anomaly` and
+`velocity_at` — and the energy test wanted it a third time; both call sites
+now go through the method. `self` by value matches `position_at_dt`; μ stays
+a parameter, never a field (central-body rule). Swapping both sites moved no
+test, which is the check that the two inline copies really were the same
+expression.
+- DOC DRIFT to fix: the units explanation ("μ is m³/s², a³ is m³, so μ/a³
+  is 1/s² and its square root is rad/s") still sits on
+  `propagate_mean_anomaly`, but the arithmetic it explains now lives in
+  `mean_motion`. Move it. Neither new method has a doc comment yet, which
+  breaks the file's convention that every pub fn carries one.
+
+`integrate.rs` — NEW 2026-08-08, first pass COMPLETE, 4 tests passing
+(tests (a), (b) and (c) of the plan; (d) still to write).
 - `two_body(mu, &state) -> DVec3` — `-mu * r / r.length().powi(3)`.
   The cube is inverse-square PLUS the normalization of r, not
   inverse-cube gravity. Sign is negative because r runs origin→ship and
@@ -337,6 +352,21 @@ still NOT written; the integrator tests build their initial state via
     vs half of 2,861,969.42 = 1,430,984.71, off by 2.93 m) — ~40×
     headroom inside the band, while a second-order scheme (0.25) or a
     broken one (→1.0) fails loudly.
+  - `energy_bound` — test (c), added 2026-08-09. ZERO THRUST. Asserts
+    `max |ε − ε₀| / |ε₀| < 2e-5` where `ε = v²/2 − μ/r`, over 100 orbits
+    sampled **20 times per orbit**, 3600 s substeps, `dt` derived from
+    `elements.period(mu)`. Observed max drift 1.279973e-5 (~56% headroom).
+    Verified to actually catch its bug: swapping the two update lines to
+    forward Euler gives 0.354, a factor of 2.8e4. Both numbers recorded in
+    the test comment. Independently confirmed the oscillation amplitude is
+    FLAT across 400 orbits (1.279376e-5 → 1.279380e-5, seventh sig fig) —
+    that flatness, not the position tests, is the actual proof the stepper
+    is symplectic.
+    - The sampling rate is load-bearing; see the sampling-phase gotcha
+      below. Do NOT "simplify" this to one sample per orbit.
+    - `t0` accumulates across chunks and is passed into `integrate`. It is
+      a no-op today (gravity ignores t) and exists so the pattern is right
+      before `burns.rs` makes it load-bearing.
 - Test-module helpers (extracted 2026-08-09, commit dced990):
   `emb_j2000_elements() -> OrbitalElements` (the transcribed JPL fixture)
   and `kepler_miss(substep: f64) -> f64` (build state → integrate →
@@ -345,13 +375,15 @@ still NOT written; the integrator tests build their initial state via
   Horizons data across tests is the failure mode this repo has already been
   bitten by three ways. `coast_vs_horizons` deliberately keeps its expected
   vectors inline and does NOT use the helpers — see the testing convention
-  below.
+  below. `specific_energy(mu, &state) -> f64` is a third helper, test-local
+  for now; `Trajectory::from_state` already computes ε internally for its
+  Escape/Elliptic split, so promoting it into `vectors.rs` is the obvious
+  next dedup if a third caller shows up.
 
 3D migration (branch adventure-to-the-third-dimension): COMPLETE.
 Checklist items 1–7 plus `Trajectory::from_state` in full 3D all done.
 
-Tests green as of 2026-08-09 (22 sim-core tests); clippy RED, see the top
-of this section.
+fmt/clippy/tests all green as of 2026-08-09 (23 sim-core tests).
 
 Next up, in order (REORDERED 2026-08-08 — the burn integrator was moved
 ahead of the CLI). Rationale: the CLI's command surface is defined by what
@@ -371,13 +403,12 @@ only buys 60×, leaving ~48 km of truncation over 121.75 d. Euler is fine
 for burns (hours, not months); RK4 is what the pinned perturbed-coast
 feature will need, not the burn integrator.
 
-0. FIRST: fix clippy on `integrate.rs:125` —
-   `(0.48..=0.52).contains(&ratio)`. CI is red until this lands.
-2. Remaining integrator tests, in order of what they catch:
-   c. Energy bound over many orbits — catches the forward-Euler ordering
-      slip. ZERO-THRUST ONLY: symplectic requires a separable Hamiltonian,
-      and constant inertial thrust is an external force. Asserting this on
-      a thrusting state means chasing physics as if it were a bug.
+DONE 2026-08-09: test (c), `energy_bound`, plus the `mean_motion`/`period`
+extraction it motivated. The integrator is now confirmed symplectic by
+measurement (bounded energy oscillation, flat over 400 orbits), not by
+inspection of the statement order.
+
+2. Remaining integrator tests:
    d. Pure kinematics, μ=0, constant accel vs. r₀+v₀t+½at². Euler carries
       a ½a·dt·t bias, so assert with tolerance — the residual is expected,
       not a bug. NOTE μ=0 means `two_body` is not the accel fn here (its
@@ -511,6 +542,30 @@ feature will need, not the burn integrator.
   copy from there rather than re-editing raw Horizons output. Take the
   digit trim, not clippy's underscore-separated suggestion; the rest of
   the repo uses the plain form.
+- **Sampling phase can cancel the very signal you are measuring** (bitten
+  2026-08-09, `energy_bound`). Sampling a periodic system once per period
+  means every sample lands at the SAME phase as the reference sample, so a
+  phase-dependent quantity subtracts against itself. The first version of
+  `energy_bound` sampled once per orbit and measured 8.4e-9 — the real
+  oscillation amplitude is 1.28e-5, ~1,500× larger. Worse, the residual it
+  did see grew LINEARLY with orbit count (8.387e-11 per orbit, dead linear
+  from 1 to 2000 orbits), because the numerical period differs slightly
+  from the Kepler period so the sample point slowly precesses. That looks
+  exactly like secular energy drift and is not. Sample several times per
+  period. Diagnostic that separates the two: fine-sample and check whether
+  the AMPLITUDE is flat in time — bounded amplitude with a growing
+  stroboscopic reading is phase walk, not drift.
+- A tolerance on a quantity that grows with a loop bound is a trap: the
+  one-sample-per-orbit `energy_bound` had 7% headroom and would have failed
+  at 108 orbits, blaming the physics for a threshold problem. Prefer
+  asserting a quantity that is BOUNDED in the loop variable, so the
+  tolerance survives someone lengthening the run.
+- An accumulator whose only consumer is the `assert!` failure message does
+  NOT trip `unused_variables` — it is genuinely read, just not where you
+  meant (bitten 2026-08-09: `t0` was incremented correctly and still passed
+  `0.0` into `integrate`). Same family as the bare-`two_body` bug: the
+  compiler confirms the code is well-formed, never that it means what you
+  intended. After wiring a new variable through, grep the call site.
 - `cargo test` passing does NOT mean CI passes — clippy is a separate gate
   and CI is `-D warnings` (bitten 2026-08-09: `dced990` pushed green tests
   with a red `manual_range_contains`). Run

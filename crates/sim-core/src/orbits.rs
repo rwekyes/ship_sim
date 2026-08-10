@@ -41,17 +41,18 @@ impl OrbitalElements {
         let ecc_anomaly = solve_kepler(ma, self.eccentricity)?;
         Ok(position_at(&self, ecc_anomaly))
     }
+    /// Orbital period in seconds, given mu
     pub fn period(self, mu: f64) -> f64 {
         TAU / self.mean_motion(mu)
     }
-
+    /// Computes mean motion given mu
+    /// μ is m³/s², a³ is m³, so μ/a³ is 1/s² and its square root is rad/s.
     pub fn mean_motion(self, mu: f64) -> f64 {
         (mu / self.semi_major_axis.powi(3)).sqrt()
     }
 }
 /// Propagate the mean anomaly
 ///
-/// μ is m³/s², a³ is m³, so μ/a³ is 1/s² and its square root is rad/s.
 /// mu can be retrieved from bodies.rs per major body or supplied raw
 /// dt is seconds since elements.epoch
 pub fn propagate_mean_anomaly(elements: &OrbitalElements, mu: f64, dt: f64) -> f64 {
