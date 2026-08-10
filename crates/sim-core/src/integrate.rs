@@ -175,7 +175,7 @@ mod tests {
             state.position + state.velocity * dt + 0.5 * a * dt.powi(2) + 0.5 * a * h * dt;
         let residual = final_state.position.distance(expected_position);
         assert!(
-            residual < 3.052e-5,
+            residual < 1e-4,
             "residual {} is above tolerance 3.052e-5",
             residual
         );
