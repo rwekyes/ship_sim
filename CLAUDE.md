@@ -166,15 +166,16 @@ cargo member unless WASM.
 `cargo test --workspace`. Warnings are errors in CI. rust-toolchain.toml
 pins stable + components.
 
-## Current state (as of 2026-08-09)
+## Current state (as of 2026-08-10)
 
-Head is ee818ad plus an UNCOMMITTED `integrate.rs` carrying test (d),
-`pure_kinematics`. 24 sim-core tests, fmt/clippy/tests all green locally
-(full CI gate run, not just `cargo test`). `integrate.rs` is the newest
-module and roadmap item 2 is now COMPLETE — the integrator is validated
-four independent ways: an exact analytic oracle (a), a convergence rate
-(b), a conservation law (c), and a closed-form error model (d).
-Next real work is `burns.rs`.
+Head is 3d40ab7 on branch `burn_integrator`, working tree clean. 31 sim-core
+tests, fmt/clippy/tests all green locally (full CI gate run, not just
+`cargo test`). `burns.rs` is the newest module: the `Burn` type, its
+validating constructor, and the serde boundary are DONE; `accel_at` is NOT
+written yet, so roadmap item 3 is half complete. Roadmap item 2
+(`integrate.rs`) is COMPLETE — the integrator is validated four independent
+ways: an exact analytic oracle (a), a convergence rate (b), a conservation
+law (c), and a closed-form error model (d).
 
 
 Done: workspace scaffold, README, MIT license, .gitignore (/target, .idea/,
@@ -389,12 +390,15 @@ expression.
     Velocity is separately asserted: for constant accel `v_N = v0 + a*t`
     with NO bias term — the correction lands only on position. Observed
     9.183e-13 m/s against a 1e-9 tolerance.
-    - OUTSTANDING: the position tolerance is set to 3.052e-5, i.e. 1.00008×
-      the observed value — no headroom at all. Two ULP (6.1e-5) fails, and
-      a release build's FMA contraction or a larger fixture coordinate
-      would get there. Widen to 1e-4 (~3 ULP), still nine orders inside the
-      1,000 km budget. Same knife-edge mistake as the first `energy_bound`
-      threshold; see the loop-bound tolerance gotcha below.
+    - RESOLVED 2026-08-10: the position tolerance was 3.052e-5, i.e.
+      1.00008× the observed value — no headroom at all. Two ULP (6.1e-5)
+      fails, and a release build's FMA contraction or a larger fixture
+      coordinate would get there. Now widened to 1e-4 (~3 ULP), still nine
+      orders inside the 1,000 km budget. Same knife-edge mistake as the
+      first `energy_bound` threshold; see the loop-bound tolerance gotcha
+      below. NOTE the assert's failure MESSAGE still reads "above tolerance
+      3.052e-5" while the compared value is 1e-4 — stale string, would
+      misreport on failure. Fix when next in the file.
     - Bonus guard, not yet recorded as a receipt: forward Euler flips the
       bias SIGN, so the two schemes differ by exactly `a*h*t` = 34,068.7 m
       here. This test discriminates the statement ordering by nine orders
@@ -413,10 +417,90 @@ expression.
   Escape/Elliptic split, so promoting it into `vectors.rs` is the obvious
   next dedup if a third caller shows up.
 
+`burns.rs` — NEW 2026-08-10, PARTIAL (roadmap item 3). The type, its
+validating constructor, and the serde boundary are done and tested;
+`accel_at` is not written yet. Commits 0daf0a8 → 3d40ab7 on branch
+`burn_integrator`.
+- `BurnError` — thiserror enum, three variants, each carrying the offending
+  value: `InvalidDirection(DVec3)`, `InvalidDuration(f64)`,
+  `InvalidAccel(f64)`. Deliberately does NOT derive `PartialEq` — the
+  variants carry f64, and `NaN != NaN`, so `assert_eq!` on an error built
+  from a NaN input would fail for reasons unrelated to the code. Tests
+  match with `let Err(BurnError::X(v)) = … else { panic!() }` instead,
+  which also binds the payload so the carried value gets asserted.
+- `Burn` — `start: Epoch`, `duration: f64` (seconds), `accel: f64` (m/s²),
+  `direction: DVec3` (unit). ALL FOUR FIELDS PRIVATE, four by-value getters
+  (`self`, not `&self` — matches `position_at_dt`/`mean_motion`; the type
+  is Copy).
+- **Acceleration is a SCALAR plus a separate unit direction, not one
+  combined vector** (settled 2026-08-10). The two are constrained by
+  different things: magnitude by the SHIP (max thrust, crew g-tolerance),
+  direction by the TRAJECTORY solve. Splitting them gives the magnitude a
+  natural place to be range-checked and leaves `direction` with exactly one
+  invariant. It also matches the planner's output shape (Δv, burn time,
+  heading), the display boundary (players say "a third of a g"), and the
+  future fuel scalar ṁ = m·a/(g₀·Isp), which wants the magnitude directly
+  rather than a `.length()` re-derivation.
+- There is deliberately NO maximum-accel check. That is a ship property,
+  not a burn property — `Burn` cannot know whether 5 g is impossible or
+  merely unpleasant. Same rule as μ belonging to the central body: the
+  constraint lives with the thing that owns it. It goes wherever `Ship`
+  lands.
+- **Zero accel and zero duration are VALID, not errors** (settled
+  2026-08-10). A degenerate planner leg (a burn that rounds away, a flip
+  with no coast) should not be an error, and `accel_at` returns zero for it
+  anyway. The bar is finite and non-negative. `zeros_are_ok` exists purely
+  to pin this judgment call so a later "tightening" to `> 0.0` goes red.
+- `Burn::new(start, duration, accel, direction) -> Result<Self, BurnError>`
+  — parse-don't-validate. `direction.try_normalize().ok_or(…)?` handles
+  zero AND non-finite vectors in one shot (`try_normalize` returns None for
+  both; bare `normalize` would silently yield NaN). The f64 guards are
+  written `!x.is_finite() || x < 0.0` so NaN falls into the error branch —
+  `x >= 0.0` inverted does not, as obviously. The shadowed `let direction`
+  means the rest of the fn cannot see the un-normalized parameter.
+- **serde: `#[serde(try_from = "BurnRepr")]`.** A plain `#[derive(Deserialize)]`
+  builds structs field-by-field and NEVER calls the constructor — field
+  privacy does not stop it — so seed JSON with `"direction":[3,0,0]` would
+  have given 3× thrust silently. `BurnRepr` is a private mirror struct
+  deriving only `Deserialize`; `impl TryFrom<BurnRepr> for Burn` just calls
+  `Burn::new`. One validation path for both code and wire.
+  - The attribute takes the type name as a STRING LITERAL (serde quirk).
+  - It requires `Self::Error: Display`, which thiserror's `#[error("…")]`
+    already provides — the concrete payoff for using thiserror here.
+  - `Serialize` still reads `Burn`'s own fields while `Deserialize` reads
+    `BurnRepr`'s, so the two field-name lists must agree. Renaming one and
+    not the other breaks the round-trip at RUNTIME. Adding a field is safe
+    (BurnRepr feeds `new` positionally, so arity changes are a compile
+    error). `serialize_round_trip` is the guard for the rename case.
+  - Typed error is LOST across the boundary: serde folds `BurnError` into
+    `serde_json::Error`, keeping only the Display string. Callers
+    deserializing seed data cannot `match` on `BurnError`. Relevant when
+    player-command handling gets built.
+- 7 tests: `serialize_round_trip`, `non_unit_json`, `invalid_direction`,
+  `invalid_duration`, `invalid_accel`, `zeros_are_ok`, `serde_rejection`.
+  `serde_json` added to sim-core `[dev-dependencies]` (test-only, so it
+  stays out of the shipped lib and the WASM build — the no-I/O rule is
+  about what the crate IS, not what its tests use).
+  - `non_unit_json` is the ONLY test that proves `try_from` is wired:
+    feeds raw JSON `"direction":[2.0,-3.0,6.0]` (length exactly 7, so the
+    expected value is exactly `(2,-3,6)/7`), asserts the result is
+    normalized. Receipt: commenting out the attribute makes it fail while
+    `serialize_round_trip` stays green. Chosen over `[3,0,0]` because an
+    axis-aligned vector normalizes to itself and can pass by accident.
+  - `serialize_round_trip` would pass WITH OR WITHOUT the attribute — what
+    serde writes is already normalized, so a plain derive round-trips it
+    unchanged. It is a field-name-drift guard, not invariant coverage.
+  - The three `invalid_*` tests are near-identical blocks and deliberately
+    do NOT share a helper — they are assertions, and the DRY rule below
+    says assertions duplicate. Each covers negative/NaN/infinity (or
+    zero/NaN/infinity for direction). The NaN cases are the point: a NaN
+    accel is exactly what the original `!accel.is_nan()` typo let through
+    while REJECTING every valid burn (found 2026-08-10 — see gotcha below).
+
 3D migration (branch adventure-to-the-third-dimension): COMPLETE.
 Checklist items 1–7 plus `Trajectory::from_state` in full 3D all done.
 
-fmt/clippy/tests all green as of 2026-08-09 (24 sim-core tests).
+fmt/clippy/tests all green as of 2026-08-10 (31 sim-core tests).
 
 Next up, in order (REORDERED 2026-08-08 — the burn integrator was moved
 ahead of the CLI). Rationale: the CLI's command surface is defined by what
@@ -450,11 +534,26 @@ position tolerance (see the OUTSTANDING note in the Current state section).
    (thousands of steps); order 10⁴ km/yr along-track drift over year-long
    coasts, i.e. the same ballpark as the two-body error already accepted.
    Test (b) pinned the real number.
-3. `burns.rs`: `Burn { start: Epoch, duration, accel, direction }` +
-   `accel_at(reference, t) -> DVec3`, zero outside the window. The Epoch →
-   f64-seconds boundary lives HERE, not in integrate.rs. Normalize
-   direction in a constructor (parse-don't-validate; a non-unit direction
-   silently scales thrust).
+DONE 2026-08-10: the `Burn` type, `Burn::new`, `BurnError`, the getters and
+the `#[serde(try_from)]` boundary, with 7 tests (item 3, first half) — see
+the `burns.rs` entry in Current state.
+3. `burns.rs` REMAINING: `accel_at(reference, t) -> DVec3`, zero outside
+   the window. The Epoch → f64-seconds boundary lives HERE, not in
+   integrate.rs — `time::seconds_since` is the conversion. Returns
+   `accel * direction` inside the window, `DVec3::ZERO` outside.
+   - Make the window HALF-OPEN, `[start, start + duration)`. A closed
+     interval double-counts the shared instant when two brachistochrone
+     legs abut, which is exactly the flip point. One-line decision now,
+     nasty bug later.
+   - Test set: inside, before start, after end, and specifically BOTH
+     boundary instants — `start` (must fire) and `start + duration` (must
+     not). The boundaries are the only place the half-open choice is
+     observable, so they are the whole point of the test.
+   - Feeding it to `integrate` means a closure like
+     `|t, s| two_body(mu, s) + burn.accel_at(ref_epoch, t)` — note this is
+     where `integrate`'s `t0` threading finally becomes load-bearing
+     instead of a no-op, and where passing `two_body` bare would go wrong
+     in a new way. Acceleration stays gravity + thrust, never thrust alone.
 4. The burn planner (closed-form; solve flip time / duration / Δv for a
    target). Deferred deliberately — it needs a trustworthy integrator to
    check against, and it does not need to exist for 1–3 to be correct.
@@ -624,3 +723,70 @@ position tolerance (see the OUTSTANDING note in the Current state section).
 - A test that PASSES prints nothing, so `--nocapture` will not show you a
   miss you want to record. To measure it, tighten the tolerance until the
   assert fails and read the number out of the panic message.
+- **`is_nan()` where you meant `is_finite()` inverts a guard clause and
+  compiles clean** (bitten 2026-08-10, `Burn::new`). `!accel.is_nan() ||
+  accel < 0.0` rejects EVERY valid accel (2.943 is not NaN, so `!false` is
+  true and the `||` short-circuits) while ACCEPTING NaN (`!true` is false,
+  and `NaN < 0.0` is also false). Exactly backwards in both directions, and
+  clippy says nothing — both are f64 → bool methods. Same family as the
+  bare-`two_body` bug: well-formed, meaningless. `is_finite()` is also what
+  catches ±infinity, which `is_nan()` never would. A validation function is
+  precisely the code that looks obviously right and isn't — write the tests
+  before trusting the read.
+- Deriving `PartialEq` on an error enum whose variants carry f64 quietly
+  breaks the NaN tests: `E::Invalid(f64::NAN) == E::Invalid(f64::NAN)` is
+  FALSE. Don't derive it to make `assert_eq!` work; use
+  `let Err(E::Invalid(v)) = … else { panic!() }` and assert `v.is_nan()`.
+  `matches!` inside `assert!` also works but prints a useless message and
+  discards the payload.
+- **A symmetric round-trip assertion cannot catch a swapped getter.**
+  `assert_eq!(a.accel(), b.accel())` passes even if `accel()` returns
+  `self.duration`, because both sides return the same wrong field. Catching
+  a field swap needs an ASYMMETRIC assertion against the literal passed to
+  the constructor, with DISTINCT values per field (duration 60.0, accel
+  100.0 — equal values can't catch a swap). Same family as the (M, e)
+  gotcha above.
+- **`assert!(result.is_err())` passes when your test data is malformed.**
+  A JSON literal with a missing brace makes `from_str` return Err, so a
+  validation test written as bare `is_err()` sits green while testing
+  nothing (nearly shipped 2026-08-10 in `serde_rejection`). Assert on the
+  message — `err.to_string().contains("must be finite")` — so the failure
+  is provably YOURS and not a parse error. Generalizes: any test that can
+  pass for the wrong reason isn't covering what its name claims.
+- serde_json's "EOF while parsing an object" with a column equal to the
+  LENGTH of your input means truncation (an unclosed `{`), not a typo
+  mid-string. A malformed key or value points at a column in the middle.
+- **hifitime `Epoch` serializes as a Display STRING, and the time-scale
+  suffix is load-bearing.** `impl Serialize` is `serialize_str(&self.to_string())`,
+  `Deserialize` is `Epoch::from_str`. So J2000 is
+  `"2000-01-01T12:00:00 TT"` in JSON. Omitting ` TT` does NOT error — it
+  parses as UTC, 64.184 s off, ~1,900 km of Earth motion, same hazard as
+  `hifitime::J2000_REF_EPOCH`. Hand-written epoch JSON in tests and seed
+  data must carry the scale.
+- glam serializes `DVec3` as a 3-element ARRAY `[x, y, z]`, not an object
+  with x/y/z keys. Verified for glam 0.33.2 with the `serde` feature.
+- `Display` is NOT derivable — not for any type, ever. `Debug` is (for
+  programmers); `Display` is user-facing and std won't guess. thiserror's
+  `#[error("…")]` IS a Display-impl generator, which is why `BurnError` has
+  one for free. Note `serde_json::to_string(&x)` is a free function going
+  through `Serialize` and has nothing to do with `ToString`/`Display` —
+  reaching for `.to_string()` on a struct is the wrong call and the
+  "implement Display" error that follows is a red herring.
+- Converting `Option` → `Result` is `ok_or(err)` / `ok_or_else(|| err)`,
+  not an `is_none()` test — a boolean check throws away the value you then
+  have to unwrap anyway. Use `ok_or` when the error is cheap to build (a
+  Copy payload into an enum variant); `ok_or_else` only when construction
+  allocates. Verified 2026-08-10: `ok_or_else(|| E::Variant(v))` DOES trip
+  `clippy::unnecessary_lazy_evaluations` ("unnecessary closure used to
+  substitute value for `Option::None`"), and CI is `-D warnings`, so the
+  lazy form on a cheap error is a build failure. `is_none_or` is a DIFFERENT method
+  (None, or Some matching a predicate) and is what autocomplete offers.
+- `serde_json::from_str` is generic over its return type, so it needs an
+  annotation — `let b: Burn = …` or `from_str::<Burn>(…)`. The turbofish
+  reads better when there's no binding to annotate (e.g. asserting on an
+  error).
+- Normalizing an already-unit vector is not guaranteed to be the identity —
+  the length of a normalized vector is `1.0 ± an ulp`, so dividing again
+  can shift the last bit. A serde round-trip normalizes TWICE (once in
+  `new`, once in `try_from`), so compare directions with a tolerance, never
+  `==`. Scalars (f64 through serde_json) DO come back bit-identical.
