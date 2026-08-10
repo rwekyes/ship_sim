@@ -41,6 +41,13 @@ impl OrbitalElements {
         let ecc_anomaly = solve_kepler(ma, self.eccentricity)?;
         Ok(position_at(&self, ecc_anomaly))
     }
+    pub fn period(self, mu: f64) -> f64 {
+        TAU / self.mean_motion(mu)
+    }
+
+    pub fn mean_motion(self, mu: f64) -> f64 {
+        (mu / self.semi_major_axis.powi(3)).sqrt()
+    }
 }
 /// Propagate the mean anomaly
 ///
@@ -48,8 +55,7 @@ impl OrbitalElements {
 /// mu can be retrieved from bodies.rs per major body or supplied raw
 /// dt is seconds since elements.epoch
 pub fn propagate_mean_anomaly(elements: &OrbitalElements, mu: f64, dt: f64) -> f64 {
-    (((mu / elements.semi_major_axis.powi(3)).sqrt() * dt) + elements.mean_anomaly_epoch)
-        .rem_euclid(TAU)
+    ((elements.mean_motion(mu) * dt) + elements.mean_anomaly_epoch).rem_euclid(TAU)
 }
 /// Kepler solver
 ///
@@ -95,7 +101,7 @@ pub fn position_at(elements: &OrbitalElements, ecc_anomaly: f64) -> DVec3 {
 /// ecc_anomaly is radians from solve_kepler, returns DVec3 in meters / sec
 pub fn velocity_at(elements: &OrbitalElements, mu: f64, ecc_anomaly: f64) -> DVec3 {
     let r = elements.semi_major_axis * (1.0 - (elements.eccentricity * ecc_anomaly.cos()));
-    let n = (mu / elements.semi_major_axis.powi(3)).sqrt();
+    let n = elements.mean_motion(mu);
     let ratio = (1.0 - elements.eccentricity.powi(2)).sqrt();
     let n_a_sq_r = n * elements.semi_major_axis.powi(2) / r;
     let x_prime = -n_a_sq_r * ecc_anomaly.sin();

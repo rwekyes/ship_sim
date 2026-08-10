@@ -57,6 +57,7 @@ mod tests {
     use crate::orbits::{OrbitalElements, solve_kepler};
     use crate::time::J2000;
     use crate::vectors::elements_to_state_vector;
+    use std::f64::consts::TAU;
 
     // Test the integrator vs the Kepler propagation
     // Observed miss: 2861969.4202166707m in 1/4 orbit for Earth, tolerance set to 3000000m
@@ -127,8 +128,8 @@ mod tests {
             ratio
         );
     }
-    // Observed drift at 100 orbits: 0.000012799725102110242
-    // Swapping velocity and position updates caused drift: 0.35356232799608484
+    // Observed drift at 100 orbits sampled 20 times per orbit: 0.00001279972527773939
+    // Swapping velocity and position updates caused drift: 0.3535623174804111
     #[test]
     fn energy_bound() {
         let mu = MU_SOL + MU_EARTH + MU_LUNA;
@@ -138,9 +139,9 @@ mod tests {
         let epsilon_0 = specific_energy(mu, &state);
         let mut max: f64 = 0.0;
         let mut t0: f64 = 0.0;
-        let dt = 3.155798e7 / 20.0;
+        let dt = elements.period(mu) / 20.0;
         for _ in 0..2000 {
-            state = integrate(state, 0.0, dt, 3600.0, |_t, s| two_body(mu, s));
+            state = integrate(state, t0, dt, 3600.0, |_t, s| two_body(mu, s));
             t0 += dt;
             let epsilon = specific_energy(mu, &state);
             let difference = epsilon - epsilon_0;
@@ -149,12 +150,7 @@ mod tests {
                 max = drift;
             }
         }
-        assert!(
-            max < 2e-5,
-            "max {} above threshold 2e-5, time elapsed {} seconds",
-            max,
-            t0
-        )
+        assert!(max < 2e-5, "max {} above threshold 2e-5", max)
     }
     // Helper returns J2000 elements for EMB
     fn emb_j2000_elements() -> OrbitalElements {
