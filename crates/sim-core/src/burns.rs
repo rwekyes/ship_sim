@@ -116,19 +116,19 @@ mod tests {
         let zero_vec = DVec3::new(0.0, 0.0, 0.0);
         let infinite_vec = DVec3::new(f64::INFINITY, 0.0, 0.0);
         let nan_vec = DVec3::new(f64::NAN, 0.0, 0.0);
-        let Err(BurnError::InvalidDirection(_zero_vec)) = Burn::new(*J2000, 60.0, 100.0, zero_vec)
+        let Err(BurnError::InvalidDirection(v)) = Burn::new(*J2000, 60.0, 100.0, zero_vec) else {
+            panic!("Expected an invalid direction");
+        };
+        assert_eq!(v, zero_vec);
+        let Err(BurnError::InvalidDirection(v)) = Burn::new(*J2000, 60.0, 100.0, infinite_vec)
         else {
             panic!("Expected an invalid direction");
         };
-        let Err(BurnError::InvalidDirection(_infinite_vec)) =
-            Burn::new(*J2000, 60.0, 100.0, infinite_vec)
-        else {
+        assert_eq!(v, infinite_vec);
+        let Err(BurnError::InvalidDirection(v)) = Burn::new(*J2000, 60.0, 100.0, nan_vec) else {
             panic!("Expected an invalid direction");
         };
-        let Err(BurnError::InvalidDirection(_nan_vec)) = Burn::new(*J2000, 60.0, 100.0, nan_vec)
-        else {
-            panic!("Expected an invalid direction");
-        };
+        assert!(v.x.is_nan());
     }
     // Correct error shape for negative, nan, and infinity
     #[test]
