@@ -137,20 +137,16 @@ mod tests {
         let negative_duration = -1.0;
         let nan_duration = f64::NAN;
         let infinite_duration = f64::INFINITY;
-        let Err(BurnError::InvalidDuration(d)) =
-            Burn::new(*J2000, negative_duration, 100.0, dir)
+        let Err(BurnError::InvalidDuration(d)) = Burn::new(*J2000, negative_duration, 100.0, dir)
         else {
             panic!("Expected an invalid duration");
         };
         assert_eq!(d, negative_duration);
-        let Err(BurnError::InvalidDuration(d)) =
-            Burn::new(*J2000, nan_duration, 100.0, dir)
-        else {
+        let Err(BurnError::InvalidDuration(d)) = Burn::new(*J2000, nan_duration, 100.0, dir) else {
             panic!("Expected an invalid duration");
         };
         assert!(d.is_nan());
-        let Err(BurnError::InvalidDuration(d)) =
-            Burn::new(*J2000, infinite_duration, 100.0, dir)
+        let Err(BurnError::InvalidDuration(d)) = Burn::new(*J2000, infinite_duration, 100.0, dir)
         else {
             panic!("Expected an invalid duration");
         };
@@ -163,20 +159,15 @@ mod tests {
         let negative_accel = -5.0;
         let nan_accel = f64::NAN;
         let infinite_accel = f64::INFINITY;
-        let Err(BurnError::InvalidAccel(a)) =
-            Burn::new(*J2000, 60.0, negative_accel, dir)
-        else {
+        let Err(BurnError::InvalidAccel(a)) = Burn::new(*J2000, 60.0, negative_accel, dir) else {
             panic!("Expected an invalid accel");
         };
         assert_eq!(a, negative_accel);
-        let Err(BurnError::InvalidAccel(a)) = Burn::new(*J2000, 60.0, nan_accel, dir)
-        else {
+        let Err(BurnError::InvalidAccel(a)) = Burn::new(*J2000, 60.0, nan_accel, dir) else {
             panic!("Expected an invalid accel");
         };
         assert!(a.is_nan());
-        let Err(BurnError::InvalidAccel(a)) =
-            Burn::new(*J2000, 60.0, infinite_accel, dir)
-        else {
+        let Err(BurnError::InvalidAccel(a)) = Burn::new(*J2000, 60.0, infinite_accel, dir) else {
             panic!("Expected an invalid accel");
         };
         assert_eq!(a, infinite_accel);
@@ -195,6 +186,9 @@ mod tests {
     fn serde_rejection() {
         let json = r#"{"start":"2000-01-01T12:00:00 TT","duration":60.0,"accel":-5.0,"direction":[2.0,-3.0,6.0]}"#;
         let err = serde_json::from_str::<Burn>(json).unwrap_err();
-        assert!(err.to_string().contains("must be finite"), "unexpected error: {err}");
+        assert!(
+            err.to_string().contains("must be finite"),
+            "unexpected error: {err}"
+        );
     }
 }
