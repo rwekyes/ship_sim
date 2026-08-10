@@ -103,4 +103,11 @@ mod tests {
             burn.direction().distance(new_burn.direction())
         );
     }
+    // Makes sure normalization happens, commenting out the try_from call causes failure
+    #[test]
+    fn non_unit_json() {
+        let json = r#"{"start":"2000-01-01T12:00:00 TT","duration":60.0,"accel":100.0,"direction":[2.0,-3.0,6.0]}"#;
+        let burn: Burn = serde_json::from_str(json).unwrap();
+        assert!(burn.direction().distance(DVec3::new(2.0, -3.0, 6.0) / 7.0) < 1e-15)
+    }
 }
