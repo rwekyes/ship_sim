@@ -1,6 +1,7 @@
 //! Burn related data structures and logic
 //! Boundary between Epoch and seconds
 
+use crate::time::seconds_since;
 use glam::DVec3;
 use hifitime::Epoch;
 use serde::{Deserialize, Serialize};
@@ -53,6 +54,18 @@ impl Burn {
             direction,
         })
     }
+    /// Thrust acceleration from this burn at time t, in meters per second squared
+    pub fn accel_at(self, reference: Epoch, t: f64) -> DVec3 {
+        debug_assert!(t.is_finite());
+        let start_s = seconds_since(reference, self.start);
+        let end_s = start_s + self.duration;
+        if (start_s..end_s).contains(&t) {
+            self.accel * self.direction
+        } else {
+            DVec3::ZERO
+        }
+    }
+
     pub fn start(self) -> Epoch {
         self.start
     }
@@ -89,6 +102,7 @@ impl TryFrom<BurnRepr> for Burn {
 mod tests {
     use super::*;
     use crate::time::J2000;
+    use hifitime::TimeUnits;
     #[test]
     fn serialize_round_trip() {
         let burn = Burn::new(*J2000, 60.0, 100.0, DVec3::new(0.11, -4.2, 0.77777)).unwrap();
@@ -190,5 +204,53 @@ mod tests {
             err.to_string().contains("must be finite"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn fires_inside_window() {
+        let burn = test_burn();
+        let expected = DVec3::new(2.0, -3.0, 6.0) / 7.0 * burn.accel();
+        let got = burn.accel_at(*J2000, 1.0);
+        assert!(
+            got.distance(expected) < 1e-12,
+            "thrust {got} differs from expected {expected} by {}",
+            got.distance(expected)
+        );
+    }
+
+    #[test]
+    fn zero_before_and_after() {
+        let burn = test_burn();
+        let before = *J2000 - 600.seconds();
+        let after = *J2000 + 3600.seconds();
+        assert_eq!(burn.accel_at(before, 13.0), DVec3::ZERO);
+        assert_eq!(burn.accel_at(after, 25.0), DVec3::ZERO);
+    }
+
+    #[test]
+    fn boundary_instants() {
+        let burn = test_burn();
+        assert_ne!(burn.accel_at(*J2000, 0.0), DVec3::ZERO);
+        assert_ne!(burn.accel_at(*J2000, 899.0), DVec3::ZERO);
+        assert_eq!(burn.accel_at(*J2000, 900.0), DVec3::ZERO);
+    }
+    #[test]
+    fn reference_shift_invariance() {
+        let burn = test_burn();
+        let instant = *J2000 + 363.seconds();
+        let ref_a = *J2000 - 137.seconds();
+        let ref_b = *J2000 + 500.seconds();
+        let a = burn.accel_at(ref_a, seconds_since(ref_a, instant));
+        let b = burn.accel_at(ref_b, seconds_since(ref_b, instant));
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn zero_duration_never_fires() {
+        let burn = Burn::new(*J2000, 0.0, 3.2675, DVec3::new(2.0, -3.0, 6.0)).unwrap();
+        assert_eq!(burn.accel_at(*J2000, 0.0), DVec3::ZERO);
+    }
+    fn test_burn() -> Burn {
+        Burn::new(*J2000, 900.0, 3.2675, DVec3::new(2.0, -3.0, 6.0)).unwrap()
     }
 }
