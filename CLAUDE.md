@@ -168,14 +168,16 @@ pins stable + components.
 
 ## Current state (as of 2026-08-10)
 
-Head is 3d40ab7 on branch `burn_integrator`, working tree clean. 31 sim-core
-tests, fmt/clippy/tests all green locally (full CI gate run, not just
-`cargo test`). `burns.rs` is the newest module: the `Burn` type, its
-validating constructor, and the serde boundary are DONE; `accel_at` is NOT
-written yet, so roadmap item 3 is half complete. Roadmap item 2
+Head is 0a4420c on branch `burn_integrator`, pushed, working tree clean.
+36 sim-core tests, fmt/clippy/tests all green locally (full CI gate run,
+not just `cargo test`). `burns.rs` is the newest module and roadmap item 3
+is now COMPLETE — the `Burn` type, its validating constructor, the serde
+boundary, and `accel_at` all exist and are tested. Roadmap item 2
 (`integrate.rs`) is COMPLETE — the integrator is validated four independent
 ways: an exact analytic oracle (a), a convergence rate (b), a conservation
-law (c), and a closed-form error model (d).
+law (c), and a closed-form error model (d). Nothing in sim-core has yet
+CALLED `accel_at` from inside `integrate`; that wiring is the first thing
+item 4 will touch.
 
 
 Done: workspace scaffold, README, MIT license, .gitignore (/target, .idea/,
@@ -417,10 +419,9 @@ expression.
   Escape/Elliptic split, so promoting it into `vectors.rs` is the obvious
   next dedup if a third caller shows up.
 
-`burns.rs` — NEW 2026-08-10, PARTIAL (roadmap item 3). The type, its
-validating constructor, and the serde boundary are done and tested;
-`accel_at` is not written yet. Commits 0daf0a8 → 3d40ab7 on branch
-`burn_integrator`.
+`burns.rs` — NEW 2026-08-10, COMPLETE (roadmap item 3). The type, its
+validating constructor, the serde boundary, and `accel_at` are all done and
+tested. Commits 0daf0a8 → 0a4420c on branch `burn_integrator`.
 - `BurnError` — thiserror enum, three variants, each carrying the offending
   value: `InvalidDirection(DVec3)`, `InvalidDuration(f64)`,
   `InvalidAccel(f64)`. Deliberately does NOT derive `PartialEq` — the
@@ -476,8 +477,59 @@ validating constructor, and the serde boundary are done and tested;
     `serde_json::Error`, keeping only the Display string. Callers
     deserializing seed data cannot `match` on `BurnError`. Relevant when
     player-command handling gets built.
-- 7 tests: `serialize_round_trip`, `non_unit_json`, `invalid_direction`,
-  `invalid_duration`, `invalid_accel`, `zeros_are_ok`, `serde_rejection`.
+- `accel_at(self, reference: Epoch, t: f64) -> DVec3` — the thrust HALF of
+  the acceleration only; callers add gravity. Body is four lines:
+  `debug_assert!(t.is_finite())`, `start_s = seconds_since(reference,
+  self.start)`, `end_s = start_s + self.duration`, then
+  `if (start_s..end_s).contains(&t) { self.accel * self.direction } else
+  { DVec3::ZERO }`.
+  - **`reference` is the Epoch that `t == 0.0` means.** `Burn` stores an
+    absolute `start: Epoch` (survives the DB and the wire); `integrate`
+    works in bare f64 seconds whose origin nothing records. `reference` is
+    that origin. THE CALLER MUST PASS THE SAME `reference` IT USED TO BUILD
+    `t0` — that is the one invariant this design cannot check for itself,
+    so comment it at the call site.
+  - Converts the BURN into f64, never `t` back into an `Epoch`. One Epoch
+    conversion per call instead of hifitime arithmetic on every substep.
+  - `(a..b)` is half-open BY CONSTRUCTION, so the window decision lives in
+    the type rather than in a remembered `<` vs `<=`. It also dodges
+    `clippy::manual_range_contains`, which rejects the hand-written form.
+  - Falls out for free, both verified: a zero-duration burn NEVER fires
+    (`(x..x)` is empty — correct, zero duration is zero impulse), and a NaN
+    `t` returns `DVec3::ZERO` (all NaN comparisons are false). The latter
+    is why the `debug_assert` is there: a silently-not-firing burn looks
+    exactly like a correctly-outside-the-window one.
+  - Because the constructor normalized `direction`, the returned vector's
+    magnitude is EXACTLY `self.accel`. That is the whole payoff of
+    normalizing at construction — an unnormalized direction would scale
+    thrust here silently.
+- 12 tests. Constructor/serde (7): `serialize_round_trip`, `non_unit_json`,
+  `invalid_direction`, `invalid_duration`, `invalid_accel`, `zeros_are_ok`,
+  `serde_rejection`. `accel_at` (5): `fires_inside_window`,
+  `zero_before_and_after`, `boundary_instants`,
+  `reference_shift_invariance`, `zero_duration_never_fires`, sharing a
+  `test_burn()` fixture (start = J2000, duration 900 s, accel 3.2675,
+  direction (2,−3,6)).
+  - `boundary_instants` is the only test that pins the half-open decision:
+    `t = 0` fires, `t = 899` fires, `t = 900` does NOT. Every other test
+    passes with either a half-open or a closed window.
+  - `fires_inside_window` computes its expected value as
+    `DVec3::new(2,-3,6) / 7.0 * accel` — deliberately NOT
+    `.normalize() * accel`, which would route the expected value through
+    the same function under test and cancel a normalization bug. 7 is exact
+    because 49 is a perfect square, which is why (2,−3,6) was chosen.
+    Tolerance 1e-12, scaled to the ~3.27 magnitude (not the 1e-15 used for
+    unit-vector comparisons elsewhere in the file).
+  - `reference_shift_invariance` is a PROPERTY test: the answer must depend
+    only on the absolute instant `reference + t`, so the same instant
+    queried through two different references must agree. Exact `==` is
+    correct here (the output is SELECTED from two fixed vectors, never
+    computed from `t`, so there is no float error to tolerate). It catches
+    two bugs nothing else does — hardcoding `*J2000` instead of using the
+    `reference` parameter, and flipped `seconds_since` arguments. It also
+    feeds a NEGATIVE `t` (via `ref_b` after the burn), the only test that
+    does. Currently samples ONE instant; sampling several (inside, before,
+    after, the `start` boundary) would strengthen it.
   `serde_json` added to sim-core `[dev-dependencies]` (test-only, so it
   stays out of the shipped lib and the WASM build — the no-I/O rule is
   about what the crate IS, not what its tests use).
@@ -500,7 +552,7 @@ validating constructor, and the serde boundary are done and tested;
 3D migration (branch adventure-to-the-third-dimension): COMPLETE.
 Checklist items 1–7 plus `Trajectory::from_state` in full 3D all done.
 
-fmt/clippy/tests all green as of 2026-08-10 (31 sim-core tests).
+fmt/clippy/tests all green as of 2026-08-10 (36 sim-core tests).
 
 Next up, in order (REORDERED 2026-08-08 — the burn integrator was moved
 ahead of the CLI). Rationale: the CLI's command surface is defined by what
@@ -534,26 +586,22 @@ position tolerance (see the OUTSTANDING note in the Current state section).
    (thousands of steps); order 10⁴ km/yr along-track drift over year-long
    coasts, i.e. the same ballpark as the two-body error already accepted.
    Test (b) pinned the real number.
-DONE 2026-08-10: the `Burn` type, `Burn::new`, `BurnError`, the getters and
-the `#[serde(try_from)]` boundary, with 7 tests (item 3, first half) — see
-the `burns.rs` entry in Current state.
-3. `burns.rs` REMAINING: `accel_at(reference, t) -> DVec3`, zero outside
-   the window. The Epoch → f64-seconds boundary lives HERE, not in
-   integrate.rs — `time::seconds_since` is the conversion. Returns
-   `accel * direction` inside the window, `DVec3::ZERO` outside.
-   - Make the window HALF-OPEN, `[start, start + duration)`. A closed
-     interval double-counts the shared instant when two brachistochrone
-     legs abut, which is exactly the flip point. One-line decision now,
-     nasty bug later.
-   - Test set: inside, before start, after end, and specifically BOTH
-     boundary instants — `start` (must fire) and `start + duration` (must
-     not). The boundaries are the only place the half-open choice is
-     observable, so they are the whole point of the test.
-   - Feeding it to `integrate` means a closure like
-     `|t, s| two_body(mu, s) + burn.accel_at(ref_epoch, t)` — note this is
-     where `integrate`'s `t0` threading finally becomes load-bearing
-     instead of a no-op, and where passing `two_body` bare would go wrong
-     in a new way. Acceleration stays gravity + thrust, never thrust alone.
+DONE 2026-08-10: item 3, ALL of it — the `Burn` type, `Burn::new`,
+`BurnError`, the getters, the `#[serde(try_from)]` boundary, and
+`accel_at`, with 12 tests. See the `burns.rs` entry in Current state. The
+window is HALF-OPEN, `[start, start + duration)`: a closed interval
+double-counts the shared instant when two brachistochrone legs abut, which
+is exactly the flip point.
+
+NOT YET DONE, and the first thing to do next: actually feed `accel_at` to
+`integrate`. The closure is
+`|t, s| two_body(mu, s) + burn.accel_at(ref_epoch, t)` — this is where
+`integrate`'s `t0` threading stops being a no-op (gravity ignores time,
+thrust does not), and where passing `two_body` bare would go wrong in a new
+way. Acceleration stays gravity + thrust, NEVER thrust alone. A powered-leg
+test wants an oracle: with μ = 0 the whole burn is `pure_kinematics` with a
+window, so the closed-form `r_N = r0 + v0*t + 0.5*a*t² + 0.5*a*h*t` still
+applies over the powered span and can be checked exactly.
 4. The burn planner (closed-form; solve flip time / duration / Δv for a
    target). Deferred deliberately — it needs a trustworthy integrator to
    check against, and it does not need to exist for 1–3 to be correct.
@@ -785,6 +833,25 @@ the `burns.rs` entry in Current state.
   annotation — `let b: Burn = …` or `from_str::<Burn>(…)`. The turbofish
   reads better when there's no binding to annotate (e.g. asserting on an
   error).
+- **An invariance/property test where BOTH sides land in the "nothing
+  happened" state is a false pass** (bitten 2026-08-10,
+  `reference_shift_invariance`). The first version used two references both
+  AFTER the burn start; under an arg-flipped `seconds_since` both queries
+  fell outside the (wrong) window, both returned `DVec3::ZERO`, they
+  compared equal, and the test went green on broken code. Verified by
+  simulating both versions against the exact test inputs. Fix was one
+  reference straddling the burn (`*J2000 - 137.seconds()`), which makes the
+  flipped version disagree. RULE: a property test must put at least one
+  compared call in the INTERESTING state, or "equal" is trivially true.
+- Exact `==` between a computed `length()` and the scalar it should equal
+  is FIXTURE LUCK, not a property. `(2,-3,6).normalize() * a` has
+  `length() == a` exactly (49 is a perfect square), but measured
+  2026-08-10: `(0.11,-4.2,0.77777)` misses by 4.44e-16, `(1,1,1)` by
+  4.44e-16, `(0.33,0.77,-0.1)*100` by 1.42e-14. `length()` is a sqrt of a
+  sum of squares — a different arithmetic route from the scalar, so it
+  needs a tolerance. Usually the whole-vector `distance(expected)` assert
+  subsumes it anyway; prefer deleting the magnitude assert over adding a
+  second tolerance.
 - Normalizing an already-unit vector is not guaranteed to be the identity —
   the length of a normalized vector is `1.0 ± an ulp`, so dividing again
   can shift the last bit. A serde round-trip normalizes TWICE (once in
