@@ -53,10 +53,12 @@ where
 mod tests {
     use super::*;
     use crate::bodies::{MU_EARTH, MU_LUNA, MU_SOL};
+    use crate::burns::Burn;
     use crate::integrate::two_body;
     use crate::orbits::{OrbitalElements, solve_kepler};
     use crate::time::J2000;
     use crate::vectors::elements_to_state_vector;
+    use hifitime::TimeUnits;
 
     // Test the integrator vs the Kepler propagation
     // Observed miss: 2861969.4202166707m in 1/4 orbit for Earth, tolerance set to 3000000m
@@ -185,6 +187,61 @@ mod tests {
             "velocity difference {} is above tolerance 1e-9",
             velocity_difference
         );
+    }
+    // Verifies adding a 0 thrust burn in the closure does not change the result
+    #[test]
+    fn full_closure_with_accel_at() {
+        let mu = MU_SOL + MU_EARTH + MU_LUNA;
+        let state = StateVector {
+            position: DVec3::new(
+                -2.65025768897131e7,
+                1.44693955627991e8,
+                -1.704331902042031e2,
+            ) * 1e3,
+            velocity: DVec3::new(0.2, 9.9, 5.3),
+        };
+        let reference = *J2000;
+        let dt: f64 = 333.0;
+        let substep = 13.0;
+        let zero_burn = Burn::new(*J2000, 60.0, 0.0, DVec3::new(0.11, -4.2, 0.77777)).unwrap();
+        let bare = integrate(state, 0.0, dt, substep, |_t, s| two_body(mu, s));
+        let summed = integrate(state, 0.0, dt, substep, |t, s| {
+            two_body(mu, s) + zero_burn.accel_at(reference, t)
+        });
+        assert_eq!(bare.position, summed.position);
+        assert_eq!(bare.velocity, summed.velocity);
+    }
+
+    #[test]
+    fn window_outside_span() {
+        let mu = MU_SOL + MU_EARTH + MU_LUNA;
+        let state = StateVector {
+            position: DVec3::new(
+                -2.65025768897131e7,
+                1.44693955627991e8,
+                -1.704331902042031e2,
+            ) * 1e3,
+            velocity: DVec3::new(0.2, 9.9, 5.3),
+        };
+        let reference = *J2000;
+        let dt: f64 = 333.0;
+        let substep = 13.0;
+        let late_burn = Burn::new(
+            *J2000 + 334.seconds(),
+            60.0,
+            3.2675,
+            DVec3::new(0.11, -4.2, 0.77777),
+        )
+        .unwrap();
+        let zero_burn = Burn::new(*J2000, 60.0, 0.0, DVec3::new(0.11, -4.2, 0.77777)).unwrap();
+        let late_integration = integrate(state, 0.0, dt, substep, |t, s| {
+            two_body(mu, s) + late_burn.accel_at(reference, t)
+        });
+        let zero_integration = integrate(state, 0.0, dt, substep, |t, s| {
+            two_body(mu, s) + zero_burn.accel_at(reference, t)
+        });
+        assert_eq!(late_integration.position, zero_integration.position);
+        assert_eq!(late_integration.velocity, zero_integration.velocity);
     }
     // Helper returns J2000 elements for EMB
     fn emb_j2000_elements() -> OrbitalElements {
