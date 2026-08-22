@@ -211,7 +211,7 @@ mod tests {
         assert_eq!(bare.position, summed.position);
         assert_eq!(bare.velocity, summed.velocity);
     }
-
+    // Burn that fires outside the integrator doesn't affect anything
     #[test]
     fn window_outside_span() {
         let mu = MU_SOL + MU_EARTH + MU_LUNA;
@@ -242,6 +242,79 @@ mod tests {
         });
         assert_eq!(late_integration.position, zero_integration.position);
         assert_eq!(late_integration.velocity, zero_integration.velocity);
+    }
+    // Constant acceleration for the whole span
+    #[test]
+    fn mu_zero_whole_span() {
+        let a = DVec3::new(0.33, -2.1, 7.7);
+        let state = StateVector {
+            position: DVec3::new(
+                -2.65025768897131e7,
+                1.44693955627991e8,
+                -1.704331902042031e2,
+            ) * 1e3,
+            velocity: DVec3::new(0.2, 9.9, 5.3),
+        };
+        let dt: f64 = 999.0;
+        let substep = 9.0;
+        let n = (dt / substep).ceil();
+        let h = dt / n;
+        let burn = Burn::new(*J2000, dt, a.length(), a).unwrap();
+        let final_state = integrate(state, 0.0, dt, substep, |t, _s| burn.accel_at(*J2000, t));
+        let expected_position =
+            state.position + state.velocity * dt + 0.5 * a * dt.powi(2) + 0.5 * a * h * dt;
+        let residual = final_state.position.distance(expected_position);
+        assert!(
+            residual < 1e-4,
+            "residual {} is above tolerance 1e-4",
+            residual
+        );
+        let velocity_difference = final_state.velocity.distance(state.velocity + a * dt);
+        assert!(
+            velocity_difference < 1e-9,
+            "velocity difference {} is above tolerance 1e-9",
+            velocity_difference
+        );
+    }
+    // Coast, burn, coast
+    #[test]
+    fn mu_zero_partial_span() {
+        let a = DVec3::new(0.33, -2.1, 7.7);
+        let state = StateVector {
+            position: DVec3::new(
+                -2.65025768897131e7,
+                1.44693955627991e8,
+                -1.704331902042031e2,
+            ) * 1e3,
+            velocity: DVec3::new(0.2, 9.9, 5.3),
+        };
+        let dt: f64 = 999.0;
+        let substep = 9.0;
+        let n = (dt / substep).ceil();
+        let h = dt / n;
+        let burn = Burn::new(*J2000 + 270.seconds(), 360.0, a.length(), a).unwrap();
+        let final_state = integrate(state, 0.0, dt, substep, |t, _s| burn.accel_at(*J2000, t));
+        let t1 = 270.0;
+        let t2 = 360.0;
+        let t3 = 369.0;
+        let r1 = state.position + state.velocity * t1;
+        let v1 = state.velocity;
+        let r2 = r1 + v1 * t2 + (a / 2.0) * t2.powi(2) + (a / 2.0) * h * t2;
+        let v2 = v1 + a * t2;
+        let r3 = r2 + v2 * t3;
+        let v3 = v2;
+        let residual = final_state.position.distance(r3);
+        assert!(
+            residual < 1e-3,
+            "residual {} is above tolerance 1e-3",
+            residual
+        );
+        let velocity_difference = final_state.velocity.distance(v3);
+        assert!(
+            velocity_difference < 1e-9,
+            "velocity difference {} is above tolerance 1e-9",
+            velocity_difference
+        );
     }
     // Helper returns J2000 elements for EMB
     fn emb_j2000_elements() -> OrbitalElements {
