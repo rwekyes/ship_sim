@@ -168,16 +168,19 @@ pins stable + components.
 
 ## Current state (as of 2026-08-10)
 
-Head is 0a4420c on branch `burn_integrator`, pushed, working tree clean.
-36 sim-core tests, fmt/clippy/tests all green locally (full CI gate run,
-not just `cargo test`). `burns.rs` is the newest module and roadmap item 3
-is now COMPLETE — the `Burn` type, its validating constructor, the serde
-boundary, and `accel_at` all exist and are tested. Roadmap item 2
-(`integrate.rs`) is COMPLETE — the integrator is validated four independent
-ways: an exact analytic oracle (a), a convergence rate (b), a conservation
-law (c), and a closed-form error model (d). Nothing in sim-core has yet
-CALLED `accel_at` from inside `integrate`; that wiring is the first thing
-item 4 will touch.
+Head is 52d11ce on branch `burn_integrator`, working tree clean. 40 sim-core
+tests, fmt/clippy/tests all green locally (full CI gate run, not just
+`cargo test`). Roadmap items 2 AND 3 are COMPLETE, and as of 2026-08-21 so
+is the wiring between them: `accel_at` is fed to `integrate` through a
+composed closure and validated four ways (see the integrate.rs powered-leg
+tests below). The integrator itself is validated four independent ways: an
+exact analytic oracle (a), a convergence rate (b), a conservation law (c),
+and a closed-form error model (d).
+
+Next real work is roadmap item 4, the closed-form burn PLANNER. Note there
+is still no `Ship` type — `ship.rs` and `systems.rs` are empty files — so
+nothing yet OWNS a (StateVector, Epoch, burns) triple. The powered closure
+currently lives only in tests. See item 4 for where that lands.
 
 
 Done: workspace scaffold, README, MIT license, .gitignore (/target, .idea/,
@@ -406,6 +409,56 @@ expression.
       here. This test discriminates the statement ordering by nine orders
       of magnitude — a sharper signal than `energy_bound` gives, because
       the expected value is exact rather than a bound.
+- POWERED-LEG tests (added 2026-08-11 → 2026-08-21, commits 84989c5 and
+  52d11ce). These are the `accel_at` → `integrate` wiring, four tests, each
+  with an oracle that needs no new Horizons pull. The closure is always
+  spelled out explicitly: `|t, s| two_body(mu, s) + burn.accel_at(ref, t)`
+  for the gravity ones, `|t, _s| burn.accel_at(*J2000, t)` for the μ = 0
+  ones (μ = 0 means there is no gravity term to add and nowhere to put μ —
+  do NOT introduce an unused `let mu = 0.0;`, it trips `unused_variables`
+  and CI is `-D warnings`).
+  - `full_closure_with_accel_at` — DIFFERENTIAL, gravity on. Integrates
+    twice, once with the bare gravity closure and once with a ZERO-accel
+    burn added, asserts bit-equality of position and velocity. Exact `==`
+    is correct: `x + 0.0 == x` for all finite x, so both runs execute
+    identical arithmetic. Catches plumbing errors (sign, wrong closure
+    parameter, bare-`two_body`); catches NOTHING about the window, since a
+    zero-magnitude burn returns zero on both sides of it.
+  - `window_outside_span` — DIFFERENTIAL, gravity on, NONZERO accel. Burn
+    starts at `*J2000 + 334.seconds()` against a 333 s span, so no sampled
+    `t` ever lands in the window; compared against the zero-accel burn run.
+    This is the test that would fail if the window logic were broken such
+    that a burn always fires — the zero-accel test cannot see that.
+  - `mu_zero_whole_span` — μ = 0, burn covers the whole span, so
+    `pure_kinematics`'s exact closed form
+    `r_N = r0 + v0·t + ½a·t² + ½a·h·t` still applies, reached through
+    `accel_at` instead of a hand-written constant closure. Observed
+    residual 3.0517578352373675e-5 m — ONE ULP again, i.e. the closed form
+    reproduces the integrator bit-for-bit through the burn machinery.
+    Tolerance 1e-4. Velocity residual 1.4254443610867755e-11 against 1e-9.
+  - `mu_zero_partial_span` — μ = 0, coast → burn → coast, the only test of
+    the WINDOW arithmetic under integration. `dt = 999`, `substep = 9`
+    (n = 111, h = 9); burn at `*J2000 + 270.seconds()` for 360 s, giving
+    phases of 30 / 40 / 41 steps = 270 / 360 / 369 s. Verified the
+    integrator really does see 40 powered steps, first `t = 270`, last
+    `t = 621`. Oracle chains three constant-acceleration phases, each
+    exact, feeding each phase's output in as the next one's initial state:
+    `r1 = r0 + v0·t1` (coast, no bias term — a = 0 kills it),
+    `r2 = r1 + v1·t2 + ½a·t2² + ½a·h·t2` (powered),
+    `r3 = r2 + v2·t3` (coast). Velocity gains only `a·t2` — the BURN
+    duration, not `dt`. Observed residual 4.276716292990389e-4, tolerance
+    1e-3. Velocity 1.0177393090653981e-12 against 1e-9.
+    - Receipt that it has teeth: the whole-span formula (i.e. pretending
+      the burn fired for all 999 s) misses by 2,430,251 m.
+    - Its tolerance is ~14 ULP where `mu_zero_whole_span` hits 1 ULP. Not a
+      worse test — the three-phase chain does the same math in a DIFFERENT
+      ORDER, so rounding accumulates differently. See the gotcha below.
+  - Deliberately NO gravity-plus-real-thrust test: gravity is nonlinear so
+    the two solutions cannot be superposed, and there is no oracle.
+    Coverage comes from the parts instead — gravity validated four ways,
+    `accel_at` validated five ways in burns.rs, and the composition is
+    addition, checked by the two differential tests. This is a decision,
+    not an oversight; say so in any future review.
 - Test-module helpers (extracted 2026-08-09, commit dced990):
   `emb_j2000_elements() -> OrbitalElements` (the transcribed JPL fixture)
   and `kepler_miss(substep: f64) -> f64` (build state → integrate →
@@ -552,7 +605,7 @@ tested. Commits 0daf0a8 → 0a4420c on branch `burn_integrator`.
 3D migration (branch adventure-to-the-third-dimension): COMPLETE.
 Checklist items 1–7 plus `Trajectory::from_state` in full 3D all done.
 
-fmt/clippy/tests all green as of 2026-08-10 (36 sim-core tests).
+fmt/clippy/tests all green as of 2026-08-21 (40 sim-core tests).
 
 Next up, in order (REORDERED 2026-08-08 — the burn integrator was moved
 ahead of the CLI). Rationale: the CLI's command surface is defined by what
@@ -593,15 +646,33 @@ window is HALF-OPEN, `[start, start + duration)`: a closed interval
 double-counts the shared instant when two brachistochrone legs abut, which
 is exactly the flip point.
 
-NOT YET DONE, and the first thing to do next: actually feed `accel_at` to
-`integrate`. The closure is
-`|t, s| two_body(mu, s) + burn.accel_at(ref_epoch, t)` — this is where
-`integrate`'s `t0` threading stops being a no-op (gravity ignores time,
-thrust does not), and where passing `two_body` bare would go wrong in a new
-way. Acceleration stays gravity + thrust, NEVER thrust alone. A powered-leg
-test wants an oracle: with μ = 0 the whole burn is `pure_kinematics` with a
-window, so the closed-form `r_N = r0 + v0*t + 0.5*a*t² + 0.5*a*h*t` still
-applies over the powered span and can be checked exactly.
+DONE 2026-08-21: `accel_at` is wired into `integrate` via the composed
+closure `|t, s| two_body(mu, s) + burn.accel_at(ref_epoch, t)`, with four
+powered-leg tests — see the integrate.rs entry in Current state.
+Acceleration is gravity + thrust, NEVER thrust alone. The closure still
+lives only in tests; no production caller exists because no `Ship` does.
+
+DECIDED but NOT BUILT — the eventual home of that closure. It needs an
+owner that holds three things at once: the ship's StateVector, WHAT TIME
+that state is, and the active burns. That is a `Ship` type (`ship.rs` is
+empty). Two decisions banked while the reasoning was fresh:
+  - **Make `reference` the epoch of the state being propagated, so `t0` is
+    always 0.0.** The one invariant `accel_at` cannot check is that the
+    caller used the same `reference` for `t0` and for the burn query;
+    defining the reference AS the state's own epoch makes the mismatch
+    unrepresentable rather than merely documented. `StateVector` carries no
+    epoch, and `Trajectory::Escape`/`PureRadial` already carry
+    `(StateVector, Epoch)` pairs — the codebase is already saying a state
+    vector is timeless and only means something beside an epoch. Advance
+    the epoch with the state each chunk; the next chunk restarts at t0 = 0.
+  - **Take `&[Burn]`, not one `Burn`.** A brachistochrone leg is TWO burns
+    (accelerate, flip, decelerate), so single-burn is the wrong shape
+    almost immediately, and two burns is exactly what the item 4 planner
+    emits. `burns.iter().map(|b| b.accel_at(reference, t)).sum::<DVec3>()`
+    — the turbofish is needed (nothing else infers the output type), and an
+    EMPTY slice sums to `DVec3::ZERO`, so pure coasting falls out as the
+    identity element with no special-casing. Own with `Vec`, accept with
+    `&[…]`.
 4. The burn planner (closed-form; solve flip time / duration / Δv for a
    target). Deferred deliberately — it needs a trustworthy integrator to
    check against, and it does not need to exist for 1–3 to be correct.
@@ -833,6 +904,35 @@ applies over the powered span and can be checked exactly.
   annotation — `let b: Burn = …` or `from_str::<Burn>(…)`. The turbofish
   reads better when there's no binding to annotate (e.g. asserting on an
   error).
+- **A test copy-pasted for its boilerplate PASSES until you modify it**
+  (bitten 2026-08-21). `mu_zero_partial_span` was a byte-for-byte duplicate
+  of `mu_zero_whole_span` under a new name; it went green in the runner
+  list and looked like progress. A green test whose name promises something
+  it does not do is worse than a missing one. After copying a test for
+  scaffolding, change the ASSERTION first, watch it fail, then make it
+  pass.
+- `integrate` evaluates the acceleration ONCE PER STEP, at the step's start
+  time `t_i = t0 + i·h`, and holds it for the whole step. So every substep
+  is entirely powered or entirely coasting — there is no half-thrusting
+  step, and burn phase lengths are always whole multiples of `h`. Landing
+  burn boundaries exactly on substep boundaries does not change the answer,
+  it just makes the phase step-counts writable by hand instead of requiring
+  you to count which `t_i` fall in the window.
+- **To make a `Burn` produce an exact known acceleration vector `a`,
+  construct it as `Burn::new(start, dur, a.length(), a)`.** The constructor
+  divides the direction by `|a|` and the accel multiplies it back, so
+  `accel_at` reconstructs `a` and the oracle can use the raw `a` — no
+  `.normalize()` anywhere in the expected value. Not bit-exact: measured
+  `|(|a|·â) − a| = 8.9e-16`, absorbed by any sane tolerance. Passing an
+  arbitrary accel instead forces every `a` in the oracle to become
+  `accel * a.normalize()`, which is more moving parts for nothing.
+- **The same closed form evaluated in a different ORDER lands on a
+  different ULP count.** `mu_zero_whole_span` (one formula) hits 1 ULP;
+  `mu_zero_partial_span` (three chained phases, same math) hits ~14 ULP —
+  4.28e-4 vs 3.05e-5 at a 1.45e11 coordinate. Neither is a worse test;
+  rounding just accumulates differently. Consequence: do NOT copy a
+  tolerance along with a formula when you restructure how it is computed.
+  Re-measure and re-set. (Bitten 2026-08-21: the copied 1e-4 failed.)
 - **An invariance/property test where BOTH sides land in the "nothing
   happened" state is a false pass** (bitten 2026-08-10,
   `reference_shift_invariance`). The first version used two references both
