@@ -3,6 +3,7 @@ use hifitime::Epoch;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::TAU;
 use thiserror::Error;
+
 /// Error types for Kepler solver
 #[derive(Debug, Error)]
 pub enum KeplerError {
@@ -33,14 +34,29 @@ pub struct OrbitalElements {
     /// Reference time at which mean_anomaly_epoch applies
     pub epoch: Epoch,
 }
+
+impl OrbitalElements {
+    pub fn position_at_dt(self, mu: f64, dt: f64) -> Result<DVec3, KeplerError> {
+        let ma = propagate_mean_anomaly(&self, mu, dt);
+        let ecc_anomaly = solve_kepler(ma, self.eccentricity)?;
+        Ok(position_at(&self, ecc_anomaly))
+    }
+    /// Orbital period in seconds, given mu
+    pub fn period(self, mu: f64) -> f64 {
+        TAU / self.mean_motion(mu)
+    }
+    /// Computes mean motion given mu
+    /// μ is m³/s², a³ is m³, so μ/a³ is 1/s² and its square root is rad/s.
+    pub fn mean_motion(self, mu: f64) -> f64 {
+        (mu / self.semi_major_axis.powi(3)).sqrt()
+    }
+}
 /// Propagate the mean anomaly
 ///
-/// μ is m³/s², a³ is m³, so μ/a³ is 1/s² and its square root is rad/s.
 /// mu can be retrieved from bodies.rs per major body or supplied raw
 /// dt is seconds since elements.epoch
 pub fn propagate_mean_anomaly(elements: &OrbitalElements, mu: f64, dt: f64) -> f64 {
-    (((mu / elements.semi_major_axis.powi(3)).sqrt() * dt) + elements.mean_anomaly_epoch)
-        .rem_euclid(TAU)
+    ((elements.mean_motion(mu) * dt) + elements.mean_anomaly_epoch).rem_euclid(TAU)
 }
 /// Kepler solver
 ///
@@ -86,7 +102,7 @@ pub fn position_at(elements: &OrbitalElements, ecc_anomaly: f64) -> DVec3 {
 /// ecc_anomaly is radians from solve_kepler, returns DVec3 in meters / sec
 pub fn velocity_at(elements: &OrbitalElements, mu: f64, ecc_anomaly: f64) -> DVec3 {
     let r = elements.semi_major_axis * (1.0 - (elements.eccentricity * ecc_anomaly.cos()));
-    let n = (mu / elements.semi_major_axis.powi(3)).sqrt();
+    let n = elements.mean_motion(mu);
     let ratio = (1.0 - elements.eccentricity.powi(2)).sqrt();
     let n_a_sq_r = n * elements.semi_major_axis.powi(2) / r;
     let x_prime = -n_a_sq_r * ecc_anomaly.sin();
