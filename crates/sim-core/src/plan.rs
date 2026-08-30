@@ -2,11 +2,11 @@
 //! Serves both the planner and the UI
 use crate::burns::Burn;
 /// May add variants for game reasons, like Waypoint
-enum Maneuver{
+enum Maneuver {
     Burn(Burn),
 }
 
-struct FlightPlan{
+struct FlightPlan {
     maneuvers: Vec<Maneuver>,
 }
 
