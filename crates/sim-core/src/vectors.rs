@@ -1,3 +1,4 @@
+use crate::bodies::CentralBody;
 use crate::orbits::{OrbitalElements, position_at, velocity_at};
 use crate::vectors::Trajectory::{Elliptic, Escape, PureRadial};
 use glam::DVec3;
@@ -64,6 +65,12 @@ impl Trajectory {
         };
         Elliptic(elements)
     }
+}
+/// Represents an orbit around a specific body
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Orbit {
+    pub center: CentralBody,
+    pub trajectory: Trajectory,
 }
 /// Signed angle from from, to to, swept around h_hat
 fn angle_in_plane(from: DVec3, to: DVec3, h_hat: DVec3) -> f64 {
