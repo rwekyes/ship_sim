@@ -97,6 +97,37 @@ cargo member unless WASM.
   longitude); convert: ω = ϖ − Ω, M₀ = L − ϖ.
 - **μ (gravitational parameter) belongs to the central body** (bodies.rs),
   not to OrbitalElements. Propagation fns take both.
+- **An orbit is meaningless without a central body, exactly as a state
+  vector is meaningless without an epoch** (settled 2026-08-29). Every
+  `Trajectory` variant already carries its time (Elliptic inside the
+  elements, Escape/PureRadial alongside), so the ONE missing piece was the
+  centre. `Orbit { center: CentralBody, trajectory: Trajectory }` in
+  vectors.rs is the complete description of a coasting object — two fields,
+  total. It lives in vectors.rs, NOT ship.rs, because a probe, a station or
+  an asteroid has one just as much as a ship does.
+  - The centre does NOT go inside `OrbitalElements`. Elements stay pure
+    geometry; adding a body reference would drag a registry dependency into
+    the most math-only module and fight the μ rule above.
+  - **Model is PATCHED CONICS**: an object is inside exactly one body's
+    sphere of influence, orbiting only that body, and SOI crossings are
+    discrete re-framing events, not a continuous blend.
+  - Because orientation is ecliptic J2000 EVERYWHERE, changing centre is a
+    pure TRANSLATION — no rotation matrices:
+    `r_new = r_old + (r_old_centre − r_new_centre)`, same for v, then
+    `Trajectory::from_state(state, new_centre.mu(), epoch)` re-derives the
+    elements. Every piece of that already exists.
+  - CONSEQUENCE worth remembering: "coasting is free, compute position on
+    demand" holds forever for PLANETS (they never change centre) but NOT
+    for ships. A ship's analytic rails are valid only until it leaves its
+    SOI, so ship propagation carries a validity horizon and the game loop
+    must check for boundary crossings. The cost of this feature is not the
+    frame math (ten lines) — it is that ship coasting stops being a pure
+    function of time and becomes a stepped process with events in it.
+  - SOI radii and transition detection are DEFERRED until a ship actually
+    needs to arrive somewhere; that is a game-loop feature and there is no
+    game loop. For The Expanse most travel is heliocentric brachistochrone
+    transit where the question is moot; it bites at the Jovian/Saturnian
+    moon stations.
 - Light delay: computed on demand from positions, never stored.
 - **Coasting state is a `Trajectory` enum** (vectors.rs), built by
   `Trajectory::from_state(&StateVector, mu, epoch)`: Elliptic(OrbitalElements),
@@ -168,19 +199,25 @@ pins stable + components.
 
 ## Current state (as of 2026-08-10)
 
-Head is 52d11ce on branch `burn_integrator`, working tree clean. 40 sim-core
-tests, fmt/clippy/tests all green locally (full CI gate run, not just
-`cargo test`). Roadmap items 2 AND 3 are COMPLETE, and as of 2026-08-21 so
-is the wiring between them: `accel_at` is fed to `integrate` through a
-composed closure and validated four ways (see the integrate.rs powered-leg
-tests below). The integrator itself is validated four independent ways: an
-exact analytic oracle (a), a convergence rate (b), a conservation law (c),
-and a closed-form error model (d).
+Head is 11f4c80 on branch `planners-and-solvers`, pushed, working tree
+clean. `burn_integrator` is merged into master; the current branch is
+branched off that merge. 40 sim-core tests, fmt/clippy/tests all green
+(full CI gate run, not just `cargo test`).
 
-Next real work is roadmap item 4, the closed-form burn PLANNER. Note there
-is still no `Ship` type — `ship.rs` and `systems.rs` are empty files — so
-nothing yet OWNS a (StateVector, Epoch, burns) triple. The powered closure
-currently lives only in tests. See item 4 for where that lands.
+Roadmap items 2 AND 3 are COMPLETE, and as of 2026-08-21 so is the wiring
+between them: `accel_at` is fed to `integrate` through a composed closure
+and validated four ways (see the integrate.rs powered-leg tests below). The
+integrator itself is validated four independent ways: an exact analytic
+oracle (a), a convergence rate (b), a conservation law (c), and a
+closed-form error model (d).
+
+In progress: roadmap item 4, the closed-form burn PLANNER. Scaffolding
+landed 2026-08-29/30 — `plan.rs` (Maneuver/FlightPlan), `CentralBody` in
+bodies.rs, and `Orbit` in vectors.rs. NO SOLVER EXISTS YET and `plan.rs`
+has NO TESTS; the next actual work is the stage-1 1-D brachistochrone.
+There is still no `Ship` type — `ship.rs` and `systems.rs` are empty files
+— so nothing yet OWNS a (StateVector, Epoch, burns) triple, and the powered
+closure lives only in tests.
 
 
 Done: workspace scaffold, README, MIT license, .gitignore (/target, .idea/,
@@ -204,6 +241,33 @@ Planet values are "system" GMs (include moons) EXCEPT Earth: JPL lists
 GM_Earth and GM_Moon separately, so MU_EARTH is Earth alone. Two-body μ
 for the Earth-Moon barycenter = MU_SOL + MU_EARTH + MU_LUNA. Never
 compute μ as G·M.
+
+`CentralBody` (added 2026-08-29) — fieldless enum, Sol through Pluto plus
+Luna, deriving Debug/Clone/Copy/PartialEq/Eq/Hash/serde. `Eq` and `Hash`
+are free on a fieldless enum and make it usable as a map key when `data/`
+starts driving body loading. `mu(self)` matches to the constants, giving
+the μ lookup ONE home and turning "which μ" from a convention into a type.
+`self` by value REQUIRES the `Copy` derive — without it `.mu()` MOVES the
+receiver and a second call on the same binding fails to compile (hit
+2026-08-29).
+- **`CentralBody::mu()` is NOT the two-body μ in general** — it is the
+  central body's μ alone, correct only when the orbiting mass is
+  negligible (i.e. ships). Two-body μ is G(M_central + M_orbiting), so a
+  PLANET needs the sum, which is why the Horizons EMB test uses
+  MU_SOL + MU_EARTH + MU_LUNA. Measured cost of substituting
+  `CentralBody::Sol.mu()` there: relative μ error 3.04e-6 → 1,429 km
+  along-track after one year, i.e. it BLOWS the 1,000 km budget on its
+  own. That asymmetry is why the constants stayed reachable.
+- Constants are now `pub(crate)`, not private and not `pub` (changed
+  2026-08-29). Zero refactoring — every consumer is a test inside
+  sim-core. External crates (sim-store/cli/server) must go through
+  `CentralBody`; the Horizons tests keep composing the sum they
+  legitimately need. Fully private would have broken EMB and Pallas with
+  no replacement.
+- The Earth-alone vs system-GM asymmetry above is now HIDDEN by the enum:
+  `CentralBody::Earth.mu()` is Earth alone, while `Jupiter.mu()` includes
+  the Galilean moons (subtly wrong for a tight Jovian parking orbit).
+  Documented on `mu()`; do not let that doc comment rot.
 
 `orbits.rs` — COMPLETE for coasting bodies, FULLY 3D, validated against
 JPL including an inclined body. Four pure free functions plus one private
@@ -602,10 +666,50 @@ tested. Commits 0daf0a8 → 0a4420c on branch `burn_integrator`.
     accel is exactly what the original `!accel.is_nan()` typo let through
     while REJECTING every valid burn (found 2026-08-10 — see gotcha below).
 
+`plan.rs` — NEW 2026-08-29, SCAFFOLD ONLY, no solver and NO TESTS.
+`Maneuver` enum (one variant, `Burn(Burn)`), `FlightPlan { maneuvers:
+Vec<Maneuver> }`, and `FlightPlan::maneuvers()` returning
+`impl Iterator<Item = &Maneuver>`.
+- Currently `mod plan;` in lib.rs is PRIVATE, and `Maneuver`/`FlightPlan`
+  are private too. Silent only because of the crate-level
+  `#![allow(dead_code)]`. Needs `pub` (and derives — Debug/Clone/serde,
+  matching every other type in the crate) before anything can use it.
+- `Maneuver::Burn(Burn)` — variant sharing a type's name is fine and
+  idiomatic (cf. `serde_json::Value::String(String)`); variants and types
+  are in different namespaces. Verified clippy-clean under `-D warnings`.
+  The only real hazard is GLOB-importing variants (`use Maneuver::*`
+  alongside `use burns::Burn`), which does collide — so don't.
+- **Do NOT implement `Iterator` for `FlightPlan` itself.** `Iterator::next`
+  takes `&mut self` and consumes, so a plan could be walked only once. A
+  FlightPlan is a collection, not a cursor: hand out iterators (the current
+  `maneuvers()` method) or `impl IntoIterator for &FlightPlan`.
+- Derived scalars (total Δv, total flight time) should be FOLDS over the
+  maneuvers, not stored fields — stored copies drift.
+- **Coast is deliberately NOT a variant.** `Burn` carries an ABSOLUTE
+  `start: Epoch`, so a coast is fully determined by the gap between
+  consecutive burns; storing it would be a second source of truth that can
+  disagree with the actual gap. Derive coast segments for display by
+  walking gaps. Same instinct as "light delay is computed on demand, never
+  stored". (This REVERSES an earlier suggestion to make the enum a full
+  timeline including Coast — the absolute-vs-relative timing mismatch is
+  what killed it.) `Flip` is likewise not a maneuver: a brachistochrone is
+  two Burns with opposite fixed inertial headings, so the flip IS the
+  transition. It only becomes a variant if rotation is given a duration.
+- **No `destination` field, deliberately (2026-08-29).** The decisive fact:
+  a stage-3 (moving-target) solve must PROPAGATE the destination, which a
+  bare `DVec3` cannot do — so a destination is a planner INPUT with
+  identity, not output metadata. A bare `DVec3` is the trap option: it
+  costs a type change later AND cannot be displayed usefully ("heading to
+  (1.2e11, …)"). A full Target/Body/Station/Ship taxonomy is really a
+  sim-store schema question and there is no store. Deferring is cheap
+  because adding a struct field is a COMPILE ERROR at every construction
+  site. TRIGGER TO STOP DEFERRING: the start of stage 3, when the
+  propagation code will say what it needs.
+
 3D migration (branch adventure-to-the-third-dimension): COMPLETE.
 Checklist items 1–7 plus `Trajectory::from_state` in full 3D all done.
 
-fmt/clippy/tests all green as of 2026-08-21 (40 sim-core tests).
+fmt/clippy/tests all green as of 2026-08-30 (40 sim-core tests).
 
 Next up, in order (REORDERED 2026-08-08 — the burn integrator was moved
 ahead of the CLI). Rationale: the CLI's command surface is defined by what
@@ -674,8 +778,33 @@ empty). Two decisions banked while the reasoning was fresh:
     identity element with no special-casing. Own with `Vec`, accept with
     `&[…]`.
 4. The burn planner (closed-form; solve flip time / duration / Δv for a
-   target). Deferred deliberately — it needs a trustworthy integrator to
-   check against, and it does not need to exist for 1–3 to be correct.
+   target). IN PROGRESS as of 2026-08-29 — types scaffolded (see `plan.rs`
+   and `CentralBody`/`Orbit` above), NO SOLVER WRITTEN. Deferred until now
+   deliberately: it needs a trustworthy integrator to check against, and it
+   did not need to exist for 1–3 to be correct. The payoff of that ordering
+   is that the two check each other — the planner emits Burns, the
+   integrator flies them, and the test asserts the ship actually arrives.
+   Staged, each testable before the next exists:
+   1. **Pure 1-D brachistochrone**, rest to rest, fixed distance d and
+      constant accel a: `t_total = 2√(d/a)`, flip at the midpoint,
+      `Δv = a·t_total`. Entirely closed form; test is a hand-computed known
+      answer. START HERE — it pins the algebra before any geometry lands
+      on top of it.
+   2. **3-D, stationary target.** Same math, direction is the unit vector
+      toward the target. First point that emits real `Burn`s and can
+      round-trip through `integrate`.
+   3. **Moving target.** Arrival time and flight time are mutually
+      dependent: guess arrival, propagate the target on its Kepler rails,
+      recompute distance and flight time, iterate. Same Newton flavour as
+      `solve_kepler`. This is ALSO the seam where the solver moves out of
+      `plan.rs` into `planner.rs` — it is where the solver stops being
+      pure algebra and starts depending on orbits.rs, giving it a
+      genuinely different dependency profile from the types.
+   4. **Nonzero initial velocity.** Breaks the symmetry; the flip is no
+      longer at the midpoint.
+   Planner needs a MAX-ACCELERATION input — the ship property deliberately
+   kept out of `Burn` (a Burn cannot know whether 5 g is impossible or just
+   unpleasant). Item 4 is where that constraint finally needs a home.
 5. CLI plot/solve commands.
 6. PINNED FEATURE (2026-07-17, wanted after the thrust integrator):
    perturbed-coast propagation via special perturbations — reuse the
@@ -904,6 +1033,12 @@ empty). Two decisions banked while the reasoning was fresh:
   annotation — `let b: Burn = …` or `from_str::<Burn>(…)`. The turbofish
   reads better when there's no binding to annotate (e.g. asserting on an
   error).
+- A method taking `self` BY VALUE on a type that is not `Copy` MOVES the
+  receiver — `body.mu()` twice on one binding is E0382, "takes ownership of
+  the receiver". The repo's `self`-by-value convention (`position_at_dt`,
+  `mean_motion`, the Burn getters) only works because those types derive
+  `Copy`. Adding a new type with that convention means adding the derive in
+  the same commit (bitten 2026-08-29, `CentralBody`).
 - **A test copy-pasted for its boilerplate PASSES until you modify it**
   (bitten 2026-08-21). `mu_zero_partial_span` was a byte-for-byte duplicate
   of `mu_zero_whole_span` under a new name; it went green in the runner
