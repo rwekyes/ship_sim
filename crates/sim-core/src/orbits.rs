@@ -36,6 +36,7 @@ pub struct OrbitalElements {
 }
 
 impl OrbitalElements {
+    /// Position as a vector given time in seconds
     pub fn position_at_dt(self, mu: f64, dt: f64) -> Result<DVec3, KeplerError> {
         let ma = propagate_mean_anomaly(&self, mu, dt);
         let ecc_anomaly = solve_kepler(ma, self.eccentricity)?;

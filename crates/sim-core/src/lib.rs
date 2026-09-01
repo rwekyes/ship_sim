@@ -3,7 +3,7 @@ pub mod bodies;
 pub mod burns;
 pub mod integrate;
 pub mod orbits;
-mod plan;
+pub mod plan;
 pub mod ship;
 pub mod systems;
 pub mod time;
