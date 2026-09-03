@@ -30,19 +30,18 @@ mod tests {
 
     #[test]
     fn one_d_brachistochrone() {
-        let mut maneuvers = Vec::new();
-        maneuvers.push(Maneuver::Burn(
-            Burn::new(*J2000, 10000.0, 7.0, DVec3::new(0.0, 0.0, 1.0)).unwrap(),
-        ));
-        maneuvers.push(Maneuver::Burn(
-            Burn::new(
-                *J2000 + 10000.0.seconds(),
-                10000.0,
-                7.0,
-                DVec3::new(0.0, 0.0, -1.0),
-            )
-            .unwrap(),
-        ));
+        let maneuvers = vec![
+            Maneuver::Burn(Burn::new(*J2000, 10000.0, 7.0, DVec3::new(0.0, 0.0, 1.0)).unwrap()),
+            Maneuver::Burn(
+                Burn::new(
+                    *J2000 + 10000.0.seconds(),
+                    10000.0,
+                    7.0,
+                    DVec3::new(0.0, 0.0, -1.0),
+                )
+                .unwrap(),
+            ),
+        ];
 
         let plan = FlightPlan { maneuvers };
 
