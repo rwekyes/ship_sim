@@ -197,11 +197,11 @@ cargo member unless WASM.
 `cargo test --workspace`. Warnings are errors in CI. rust-toolchain.toml
 pins stable + components.
 
-## Current state (as of 2026-08-10)
+## Current state (as of 2026-09-03)
 
-Head is 11f4c80 on branch `planners-and-solvers`, pushed, working tree
+Head is f913713 on branch `planners-and-solvers`, pushed, working tree
 clean. `burn_integrator` is merged into master; the current branch is
-branched off that merge. 40 sim-core tests, fmt/clippy/tests all green
+branched off that merge. 41 sim-core tests, fmt/clippy/tests all green
 (full CI gate run, not just `cargo test`).
 
 Roadmap items 2 AND 3 are COMPLETE, and as of 2026-08-21 so is the wiring
@@ -213,8 +213,12 @@ closed-form error model (d).
 
 In progress: roadmap item 4, the closed-form burn PLANNER. Scaffolding
 landed 2026-08-29/30 — `plan.rs` (Maneuver/FlightPlan), `CentralBody` in
-bodies.rs, and `Orbit` in vectors.rs. NO SOLVER EXISTS YET and `plan.rs`
-has NO TESTS; the next actual work is the stage-1 1-D brachistochrone.
+bodies.rs, and `Orbit` in vectors.rs; made `pub` with derives in 9be9019.
+Stage 1 (1-D brachistochrone) is now PINNED BY A TEST as of 2026-09-03
+(d882720, f913713) — but it is a hand-built `FlightPlan` flown through
+`integrate`, NOT a solver. STILL NO SOLVER EXISTS: nothing yet computes
+burn times from a distance. The test is the oracle the solver will be
+checked against, written first deliberately.
 There is still no `Ship` type — `ship.rs` and `systems.rs` are empty files
 — so nothing yet OWNS a (StateVector, Epoch, burns) triple, and the powered
 closure lives only in tests.
@@ -666,14 +670,17 @@ tested. Commits 0daf0a8 → 0a4420c on branch `burn_integrator`.
     accel is exactly what the original `!accel.is_nan()` typo let through
     while REJECTING every valid burn (found 2026-08-10 — see gotcha below).
 
-`plan.rs` — NEW 2026-08-29, SCAFFOLD ONLY, no solver and NO TESTS.
+`plan.rs` — NEW 2026-08-29, types COMPLETE, ONE TEST, NO SOLVER.
 `Maneuver` enum (one variant, `Burn(Burn)`), `FlightPlan { maneuvers:
 Vec<Maneuver> }`, and `FlightPlan::maneuvers()` returning
 `impl Iterator<Item = &Maneuver>`.
-- Currently `mod plan;` in lib.rs is PRIVATE, and `Maneuver`/`FlightPlan`
-  are private too. Silent only because of the crate-level
-  `#![allow(dead_code)]`. Needs `pub` (and derives — Debug/Clone/serde,
-  matching every other type in the crate) before anything can use it.
+- `pub mod plan;` plus `pub` on both types and Debug/Clone/Copy/serde
+  derives landed in 9be9019. `maneuvers` the FIELD stays private; the test
+  module can still write `FlightPlan { maneuvers }` because it is a CHILD
+  module of `plan`. An external constructor (`FlightPlan::new` or
+  `FromIterator`) does not exist yet and will be needed the moment the
+  solver lives outside this file — see stage 3 in the roadmap, which moves
+  it to `planner.rs`.
 - `Maneuver::Burn(Burn)` — variant sharing a type's name is fine and
   idiomatic (cf. `serde_json::Value::String(String)`); variants and types
   are in different namespaces. Verified clippy-clean under `-D warnings`.
@@ -705,11 +712,46 @@ Vec<Maneuver> }`, and `FlightPlan::maneuvers()` returning
   because adding a struct field is a COMPILE ERROR at every construction
   site. TRIGGER TO STOP DEFERRING: the start of stage 3, when the
   propagation code will say what it needs.
+- `one_d_brachistochrone` (added 2026-09-03, the file's ONLY test) — two
+  hand-built `Burn`s in a `FlightPlan`, flown through `integrate` in ONE
+  call over the whole 20,000 s span. mu = 0, v0 = ZERO (rest to rest),
+  a = 7 m/s^2, two 10,000 s legs, substep 10 s. Asserts the ship returns to
+  rest and has moved exactly d = a*t_leg^2 = 7e8 m.
+  - **The acceleration closure is a SUM over all maneuvers, evaluated
+    fresh at each `t` — not a cursor walked once.** Spelled
+    `plan.maneuvers().map(|m| match m { Maneuver::Burn(b) =>
+    b.accel_at(*J2000, t) }).sum::<DVec3>()`. This is the `&[Burn]`
+    decision reached through `FlightPlan`. `integrate`'s bound is `Fn`,
+    not `FnMut`, so a closure CANNOT advance an iterator even if you want
+    it to — which is the compiler agreeing with the "do NOT impl Iterator
+    for FlightPlan" rule above. Empty plan sums to `DVec3::ZERO`, so
+    coasting is the identity element with no special case.
+  - **The two legs ABUT EXACTLY: leg 2 starts at `leg1.start +
+    leg1.duration`, no gap, no epsilon, no "next microsecond".** That is
+    what the half-open `[start, start+duration)` window was chosen for. At
+    t = 10000 leg 1's `(0.0..10000.0)` excludes it and leg 2's
+    `(10000.0..20000.0)` includes it — exactly one burn fires, for free.
+    Inserting a gap adds a real unpowered coast the oracle does not model.
+  - **The Euler bias CANCELS between symmetric legs.** Each leg carries
+    `pure_kinematics`'s `1/2*a*h*t` position bias, but it is proportional
+    to `a`, which flips sign at the flip. So the total displacement is the
+    IDEAL `a*t_leg^2`, not a biased approximation — the reason the test
+    can assert a round 7e8 rather than a corrected expression.
+  - Receipt (measured 2026-09-03): BOTH residuals are EXACTLY 0.0 —
+    bit-exact, not "within tolerance". Velocity residual 0, position
+    residual vs 7e8 is 0, and dx = dy = 0 exactly (no cross-axis leak).
+  - **That exactness is FIXTURE LUCK, and the committed 1e-7 position
+    tolerance depends on it.** See the sub-ULP gotcha below. Widening it
+    to 1e-4 (matching `mu_zero_whole_span`) is an OUTSTANDING chore.
+  - Assertion-message drift, same class as `pure_kinematics`: both messages
+    hardcode "greater than 1e-7". They will misreport the moment either
+    tolerance is widened. Fix in the same edit.
 
 3D migration (branch adventure-to-the-third-dimension): COMPLETE.
 Checklist items 1–7 plus `Trajectory::from_state` in full 3D all done.
 
-fmt/clippy/tests all green as of 2026-08-30 (40 sim-core tests).
+fmt/clippy/tests all green as of 2026-09-03 (41 sim-core tests), full
+CI gate run (fmt + clippy --all-targets -D warnings + test --workspace).
 
 Next up, in order (REORDERED 2026-08-08 — the burn integrator was moved
 ahead of the CLI). Rationale: the CLI's command surface is defined by what
@@ -788,8 +830,12 @@ empty). Two decisions banked while the reasoning was fresh:
    1. **Pure 1-D brachistochrone**, rest to rest, fixed distance d and
       constant accel a: `t_total = 2√(d/a)`, flip at the midpoint,
       `Δv = a·t_total`. Entirely closed form; test is a hand-computed known
-      answer. START HERE — it pins the algebra before any geometry lands
-      on top of it.
+      answer. DONE 2026-09-03 — `one_d_brachistochrone` in plan.rs, see
+      above. NOTE what is done is the ALGEBRA PIN, flown forwards: the
+      test hand-builds the two Burns and checks the ship arrives at rest
+      having covered `a·t_leg²`. The INVERSE — given d and a, emit the
+      Burns — is not written. That inversion is the actual solver and is
+      the first thing stage 2 needs.
    2. **3-D, stationary target.** Same math, direction is the unit vector
       toward the target. First point that emits real `Burn`s and can
       round-trip through `integrate`.
@@ -941,6 +987,49 @@ empty). Two decisions banked while the reasoning was fresh:
   the formula is EXACT (not "close"), and a tolerance set at the observed
   value has zero headroom because the next representable value up is 2×.
   Set such tolerances at a few ULP, never at the measurement.
+- **A residual of EXACTLY 0.0 usually means the fixture made the arithmetic
+  exact, not that the code is exact — and a tolerance BELOW one ULP then
+  passes on luck** (measured 2026-09-03, `one_d_brachistochrone`). That
+  test's position tolerance is 1e-7 while one ULP at its 7e8 displacement
+  is 1.19e-7, i.e. the tolerance is SMALLER than the smallest nonzero
+  error representable there. It passes only because the residual is
+  bit-exact 0: with a = 7 and h = 10 every velocity increment `a·h` = 70
+  is an exact integer, so every position increment `v·h` is an exact
+  integer too, and integer sums under 2^53 are lossless. Measured sweep,
+  same test otherwise:
+    a=7.0,     h=10 (a·h = 70)      → position residual 0
+    a=7.3,     h=10 (a·h = 73)      → position residual 0
+    a=3.2675,  h=10 (a·h = 32.675)  → position residual 0
+    a=3.23619 (0.33 g), h=10        → position residual 2.62e-6  ← FAILS 1e-7
+    a=7.0,  substep=60              → position residual 1.31e-6  ← FAILS 1e-7
+    a=7.0,  leg=9999, h=10          → position residual 8.34e-7  ← FAILS 1e-7
+  So switching to a REALISTIC Expanse acceleration, or to the repo's
+  standard 60 s substep, breaks the test — for float reasons, while
+  looking like a physics regression. Note rows 5 and 6 also go inexact
+  because `h` itself stops being 10: `integrate` recomputes
+  `h = dt_total/ceil(dt_total/substep)`, and 20000/ceil(20000/60) = 59.88…,
+  19998/2000 = 9.999. RULE: before trusting a sub-ULP tolerance, perturb
+  the fixture. If the residual jumps orders of magnitude, the tolerance is
+  pinned to the fixture and not to the code.
+- **An exact multiple of one leg's Δv means a burn never fired at all**
+  (diagnostic, earned 2026-09-03). `one_d_brachistochrone` reported a final
+  velocity of exactly 70000 = `a · t_leg`, which is one whole leg, dead
+  exact. Cause was a typo'd second-burn start (`100000.0.seconds()` for
+  `10000.0`), putting its window past the end of the integration span so no
+  sampled `t` ever landed in it. Read the shape of the wrong number before
+  reading the code: a sign error on `direction` gives 2× (140000), an
+  off-by-one on the window boundary gives one substep's worth (70000 ∓ 70),
+  a partially-overlapping span gives an untidy number in between, and
+  exactly-one-leg means a total window miss. `window_outside_span` in
+  integrate.rs tests this failure mode deliberately.
+- **A one-sided `assert!(x - expected < tol)` without `.abs()` cannot
+  fail downward** (nearly shipped 2026-09-03). `position_diff - 7e8 < 1e-7`
+  was green while the ship had travelled only 350,350,000 m — half the
+  target — because −3.5e8 is very much less than 1e-7. It would also pass
+  if the ship had never moved. Any "is this close to the expected value"
+  assert needs `(a - b).abs() < tol`; the one-sided form silently degrades
+  into "is not too large", which is not what the test name claims. Same
+  family as the `assert!(result.is_err())` gotcha below.
 - Receipts are for setting tolerances WITH headroom, not for setting them
   AT the observation (bitten twice now: `energy_bound`'s first threshold at
   7%, `pure_kinematics` at 1.00008×). Measure, then round up a few×. The
