@@ -22,6 +22,7 @@ impl Clock {
 
     pub fn advance(&mut self, step: TimeStep) {
         let dt: Duration = match step {
+            TimeStep::Seconds(s) => s.seconds(),
             TimeStep::Round => 15.seconds(),
             TimeStep::Minute => 1.minutes(),
             TimeStep::Hour => 1.hours(),
@@ -32,8 +33,9 @@ impl Clock {
     }
 }
 /// Game-sized steps, convenient for quick buttons
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TimeStep {
+    Seconds(f64),
     Round,
     Minute,
     Hour,
