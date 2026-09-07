@@ -72,6 +72,14 @@ pub struct Orbit {
     pub center: CentralBody,
     pub trajectory: Trajectory,
 }
+impl Orbit {
+    pub fn from_state(state: StateVector, center: CentralBody, epoch: Epoch) -> Orbit {
+        Orbit {
+            center,
+            trajectory: Trajectory::from_state(state, center.mu(), epoch),
+        }
+    }
+}
 /// Signed angle from from, to to, swept around h_hat
 fn angle_in_plane(from: DVec3, to: DVec3, h_hat: DVec3) -> f64 {
     from.cross(to)

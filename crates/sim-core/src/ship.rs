@@ -3,22 +3,42 @@
 use crate::integrate::integrate;
 use crate::plan::{FlightPlan, Maneuver};
 use crate::time::{Clock, TimeStep};
-use crate::vectors::StateVector;
+use crate::vectors::{Orbit, StateVector};
 use glam::DVec3;
 struct Ship {
+    /// Gotta have a name
+    name: String,
+    /// Position and Velocity at time on clock
+    current_state: StateVector,
+    /// Orbit object for ease of access to orbital data
+    orbit: Orbit,
+    /// Ship's current time
+    clock: Clock,
+    /// String for now, may update to something cool like hex later
+    transponder_id: String,
+    /// kilograms
+    mass: f64,
     /// meters per second squared
     max_accel: f64,
-
-    current_state: StateVector,
-
-    clock: Clock,
 }
 impl Ship {
-    pub fn new(max_accel: f64, current_state: StateVector, clock: Clock) -> Self {
+    pub fn new(
+        name: String,
+        current_state: StateVector,
+        orbit: Orbit,
+        clock: Clock,
+        transponder_id: String,
+        mass: f64,
+        max_accel: f64,
+    ) -> Self {
         Self {
-            max_accel,
+            name,
             current_state,
+            orbit,
             clock,
+            transponder_id,
+            mass,
+            max_accel,
         }
     }
 
@@ -49,6 +69,7 @@ impl Ship {
 }
 /// Helper to calculate substeps from the total steps
 /// Currently a stub, will need to see how substeps effect performance before I implement it.
+/// May end up as a GM mode setting
 fn substep_calculator(_total: f64) -> f64 {
     1.0
 }
