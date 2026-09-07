@@ -1,8 +1,9 @@
 //! Ship objects and related code
 
-use crate::integrate::integrate;
+use crate::bodies::CentralBody;
+use crate::integrate::{integrate, two_body};
 use crate::plan::{FlightPlan, Maneuver};
-use crate::time::{Clock, TimeStep};
+use crate::time::{Clock, TimeStep, seconds_since};
 use crate::vectors::{Orbit, StateVector};
 use glam::DVec3;
 struct Ship {
@@ -10,8 +11,8 @@ struct Ship {
     name: String,
     /// Position and Velocity at time on clock
     current_state: StateVector,
-    /// Orbit object for ease of access to orbital data
-    orbit: Orbit,
+    /// Center of the Ship's current orbit
+    center: CentralBody,
     /// Ship's current time
     clock: Clock,
     /// String for now, may update to something cool like hex later
@@ -25,7 +26,7 @@ impl Ship {
     pub fn new(
         name: String,
         current_state: StateVector,
-        orbit: Orbit,
+        center: CentralBody,
         clock: Clock,
         transponder_id: String,
         mass: f64,
@@ -34,7 +35,7 @@ impl Ship {
         Self {
             name,
             current_state,
-            orbit,
+            center,
             clock,
             transponder_id,
             mass,
@@ -42,34 +43,41 @@ impl Ship {
         }
     }
 
-    pub fn fly(&mut self, plan: FlightPlan) -> StateVector {
+    pub fn fly(&mut self, plan: &FlightPlan) -> StateVector {
+        let reference = self.clock.now();
         let total_time: f64 = plan
             .maneuvers()
             .map(|m| match m {
-                Maneuver::Burn(b) => b.duration(),
+                Maneuver::Burn(b) => seconds_since(reference, b.start()) + b.duration(),
             })
-            .sum();
+            .fold(0.0, f64::max);
         let new_state = integrate(
             self.current_state,
             0.0,
             total_time,
             substep_calculator(total_time),
-            |t, _s| {
-                plan.maneuvers()
-                    .map(|m| match m {
-                        Maneuver::Burn(b) => b.accel_at(self.clock.now(), t),
-                    })
-                    .sum::<DVec3>()
+            |t, s| {
+                two_body(self.center.mu(), s)
+                    + plan
+                        .maneuvers()
+                        .map(|m| match m {
+                            Maneuver::Burn(b) => b.accel_at(reference, t),
+                        })
+                        .sum::<DVec3>()
             },
         );
         self.clock.advance(TimeStep::Seconds(total_time));
         self.current_state = new_state;
         new_state
     }
+
+    pub fn orbit(&self) -> Orbit {
+        Orbit::from_state(self.current_state, self.center, self.clock.now())
+    }
 }
-/// Helper to calculate substeps from the total steps
+/// Helper to calculate substeps from the total time
 /// Currently a stub, will need to see how substeps effect performance before I implement it.
 /// May end up as a GM mode setting
 fn substep_calculator(_total: f64) -> f64 {
-    1.0
+    60.0
 }
