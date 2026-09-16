@@ -44,6 +44,7 @@ impl Ship {
     }
 
     pub fn fly(&mut self, plan: &FlightPlan) -> StateVector {
+        // reference gets shared between total_time and both accel_at calls, can't fall out of sync
         let reference = self.clock.now();
         let total_time: f64 = plan
             .maneuvers()
@@ -80,4 +81,81 @@ impl Ship {
 /// May end up as a GM mode setting
 fn substep_calculator(_total: f64) -> f64 {
     60.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::burns::Burn;
+    use crate::plan::{FlightPlan, Maneuver};
+    use crate::time::J2000;
+    use glam::DVec3;
+    #[test]
+    fn test_flight() {
+        let test_burn1 = Burn::new(*J2000, 6000.0, 100.0, DVec3::new(0.11, -4.2, 0.77777)).unwrap();
+        let test_burn2 = Burn::new(
+            *J2000 + 6000.0,
+            6000.0,
+            100.0,
+            DVec3::new(-0.11, 4.2, -0.77777),
+        )
+        .unwrap();
+        let test_burn3 = Burn::new(
+            *J2000 + 12000.0,
+            6000.0,
+            100.0,
+            DVec3::new(-0.11, 4.2, -0.77777),
+        )
+        .unwrap();
+        let test_burn4 = Burn::new(
+            *J2000 + 18000.0,
+            6000.0,
+            100.0,
+            DVec3::new(0.11, -4.2, 0.77777),
+        )
+        .unwrap();
+        let maneuvers = vec![
+            Maneuver::Burn(test_burn1),
+            Maneuver::Burn(test_burn2),
+            Maneuver::Burn(test_burn3),
+            Maneuver::Burn(test_burn4),
+        ];
+        let test_plan = FlightPlan::new(maneuvers);
+        let name = String::from("Test Ship");
+        let initial_position = DVec3::new(1.0, 1.0, 1.0);
+        let initial_velocity = DVec3::new(1.0, 1.0, 1.0);
+        let current_state = StateVector {
+            position: initial_position,
+            velocity: initial_velocity,
+        };
+        let center = CentralBody::None;
+        let clock = Clock::new(*J2000);
+        let transponder_id = String::from("123456789");
+        let mass = 1.0;
+        let max_accel = 1000.0;
+        let mut test_ship = Ship::new(
+            name,
+            current_state,
+            center,
+            clock,
+            transponder_id,
+            mass,
+            max_accel,
+        );
+        let final_state = test_ship.fly(&test_plan);
+        let expected_position = initial_position + initial_velocity * 24000.0;
+        let expected_velocity = initial_velocity;
+        let position_distance = final_state.position.distance(expected_position);
+        let velocity_distance = final_state.velocity.distance(expected_velocity);
+        assert!(
+            position_distance <= 1e-6,
+            "Distance between initial and final position is {}, greater than tolerance of 1e-6",
+            position_distance
+        );
+        assert!(
+            velocity_distance <= 1e-8,
+            "Distance between initial and final velocity is {}, greater than tolerance of 1e-8",
+            velocity_distance
+        );
+    }
 }

@@ -17,6 +17,10 @@ impl FlightPlan {
     pub fn maneuvers(&self) -> impl Iterator<Item = &Maneuver> {
         self.maneuvers.iter()
     }
+
+    pub fn new(maneuvers: Vec<Maneuver>) -> Self {
+        FlightPlan { maneuvers }
+    }
 }
 
 #[cfg(test)]

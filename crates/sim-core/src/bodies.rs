@@ -16,6 +16,7 @@ pub enum CentralBody {
     Uranus,
     Neptune,
     Pluto,
+    None,
 }
 
 impl CentralBody {
@@ -35,6 +36,7 @@ impl CentralBody {
             CentralBody::Uranus => MU_URANUS,
             CentralBody::Neptune => MU_NEPTUNE,
             CentralBody::Pluto => MU_PLUTO,
+            CentralBody::None => 0.0,
         }
     }
 }
