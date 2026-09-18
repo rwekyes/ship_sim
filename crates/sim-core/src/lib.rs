@@ -4,6 +4,7 @@ pub mod burns;
 pub mod integrate;
 pub mod orbits;
 pub mod plan;
+pub mod planner;
 pub mod ship;
 pub mod systems;
 pub mod time;

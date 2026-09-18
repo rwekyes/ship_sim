@@ -1,10 +1,17 @@
 use crate::bodies::CentralBody;
-use crate::orbits::{OrbitalElements, position_at, velocity_at};
+use crate::integrate::{integrate, two_body};
+use crate::orbits::{
+    KeplerError, OrbitalElements, position_at, propagate_mean_anomaly, solve_kepler, velocity_at,
+};
+use crate::time::seconds_since;
 use crate::vectors::Trajectory::{Elliptic, Escape, PureRadial};
 use glam::DVec3;
 use hifitime::Epoch;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::TAU;
+
+/// Constant for coasting purposes, may remove later
+const COAST_SUBSTEP: f64 = 60.0;
 
 /// Position and Velocity Vector
 /// Units in m and m/s
@@ -77,6 +84,31 @@ impl Orbit {
         Orbit {
             center,
             trajectory: Trajectory::from_state(state, center.mu(), epoch),
+        }
+    }
+    /// Returns the Orbit's StateVector at a given time, propagates a KeplerError
+    /// epoch_param must be later than self.epoch
+    pub fn state_at(&self, epoch_param: Epoch) -> Result<StateVector, KeplerError> {
+        let mu = self.center.mu();
+        match self.trajectory {
+            Elliptic(elements) => {
+                let ecc_anomaly = solve_kepler(
+                    propagate_mean_anomaly(
+                        &elements,
+                        mu,
+                        seconds_since(elements.epoch, epoch_param),
+                    ),
+                    elements.eccentricity,
+                )?;
+                Ok(elements_to_state_vector(&elements, mu, ecc_anomaly))
+            }
+            Escape(state, epoch) | PureRadial(state, epoch) => Ok(integrate(
+                state,
+                0.0,
+                seconds_since(epoch, epoch_param),
+                COAST_SUBSTEP,
+                |_t, s| two_body(mu, s),
+            )),
         }
     }
 }
