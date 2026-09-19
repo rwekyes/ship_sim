@@ -1,4 +1,4 @@
-//! Flight plan containers
+//! Flight Plan containers
 //! Serves both the planner and the UI
 
 use crate::burns::Burn;

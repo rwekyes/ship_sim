@@ -1,3 +1,5 @@
+//! Orbital Elements containers, solvers and converters
+
 use glam::{DMat3, DVec3};
 use hifitime::Epoch;
 use serde::{Deserialize, Serialize};

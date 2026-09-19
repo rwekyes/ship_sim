@@ -1,3 +1,5 @@
+//! Position and Velocity objects and converters
+
 use crate::bodies::CentralBody;
 use crate::integrate::{integrate, two_body};
 use crate::orbits::{
@@ -80,6 +82,7 @@ pub struct Orbit {
     pub trajectory: Trajectory,
 }
 impl Orbit {
+    /// Returns an Orbit around a given CentralBody at a give Epoch
     pub fn from_state(state: StateVector, center: CentralBody, epoch: Epoch) -> Orbit {
         Orbit {
             center,
@@ -119,6 +122,7 @@ fn angle_in_plane(from: DVec3, to: DVec3, h_hat: DVec3) -> f64 {
         .atan2(from.dot(to))
         .rem_euclid(TAU)
 }
+/// Converts OrbitalElements to StateVector
 pub fn elements_to_state_vector(
     elements: &OrbitalElements,
     mu: f64,

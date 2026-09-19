@@ -1,3 +1,5 @@
+//! Integration Functions
+
 use crate::vectors::StateVector;
 use glam::DVec3;
 /// Two body gravitational acceleration calculator
