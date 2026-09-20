@@ -114,6 +114,17 @@ impl Orbit {
             )),
         }
     }
+    /// Returns the Epoch associated with a given Orbit
+    pub fn epoch(self) -> Epoch {
+        match self.trajectory {
+            Elliptic(e) => e.epoch,
+            Escape(_, e) | PureRadial(_, e) => e,
+        }
+    }
+    /// Returns the state of the Orbit at it's Epoch
+    pub fn current_state(&self) -> Result<StateVector, KeplerError> {
+        self.state_at(self.epoch())
+    }
 }
 /// Signed angle from from, to to, swept around h_hat
 fn angle_in_plane(from: DVec3, to: DVec3, h_hat: DVec3) -> f64 {
