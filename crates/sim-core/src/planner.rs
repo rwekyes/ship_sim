@@ -34,7 +34,7 @@ impl Planner {
     /// while maintaining a fixed acceleration
     /// accel must be finite and nonzero
     pub fn fixed_accel(self, accel: f64) -> Result<FlightPlan, PlanError> {
-        if !accel.is_finite() || accel <= 0.0 || accel.is_nan() {
+        if !accel.is_finite() || accel <= 0.0 {
             return Err(PlanError::InvalidAccel { accel });
         }
         let origin_state = self.origin.current_state()?;
@@ -84,7 +84,7 @@ mod tests {
     use crate::bodies::CentralBody;
     use crate::orbits::{OrbitalElements, solve_kepler};
     use crate::time::J2000;
-    use crate::vectors::{Orbit, elements_to_state_vector};
+    use crate::vectors::elements_to_state_vector;
 
     #[test]
     fn invalid_accel() {
