@@ -84,7 +84,7 @@ mod tests {
     use crate::bodies::CentralBody;
     use crate::orbits::{OrbitalElements, solve_kepler};
     use crate::time::J2000;
-    use crate::vectors::{Orbit, StateVector, elements_to_state_vector};
+    use crate::vectors::{Orbit, elements_to_state_vector};
 
     #[test]
     fn invalid_accel() {
