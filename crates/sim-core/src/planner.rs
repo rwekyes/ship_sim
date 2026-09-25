@@ -210,8 +210,8 @@ mod tests {
     fn stationary_earth() -> StateVector {
         StateVector {
             position: DVec3::new(
-                -2.650257688971310e7,
-                1.446939556279910e8,
+                -2.65025768897131e7,
+                1.44693955627991e8,
                 -1.704331902042031e2,
             ) * 1.0e3,
             velocity: DVec3::ZERO,
