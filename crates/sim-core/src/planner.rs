@@ -83,8 +83,8 @@ mod tests {
     use super::*;
     use crate::bodies::CentralBody;
     use crate::orbits::{OrbitalElements, solve_kepler};
-    use crate::time::J2000;
-    use crate::vectors::elements_to_state_vector;
+    use crate::time::{Clock, J2000};
+    use crate::vectors::{StateVector, elements_to_state_vector};
 
     #[test]
     fn invalid_accel() {
@@ -110,6 +110,47 @@ mod tests {
         };
         assert!(accel.is_nan());
         assert!(a_nan.is_nan());
+    }
+
+    // Recorded miss: 0.0010911002640611102
+    #[test]
+    fn stationary_target() {
+        let center = CentralBody::None;
+        let planner = Planner::new(
+            Orbit::from_state(stationary_earth(), center, *J2000),
+            Orbit::from_state(stationary_near_origin(), center, *J2000),
+        );
+        let test_plan = planner.fixed_accel(33.333).unwrap();
+        let name = String::from("Test Ship");
+        let current_state = stationary_earth();
+        let clock = Clock::new(*J2000);
+        let transponder_id = String::from("123456789");
+        let mass = 1.0;
+        let max_accel = 1000.0;
+        let mut test_ship = crate::ship::Ship::new(
+            name,
+            current_state,
+            center,
+            clock,
+            transponder_id,
+            mass,
+            max_accel,
+        );
+        let final_state = test_ship.fly(&test_plan);
+        let position_distance = final_state
+            .position
+            .distance(stationary_near_origin().position);
+        let velocity_distance = final_state.velocity.distance(DVec3::ZERO);
+        assert!(
+            position_distance <= 1.1e-3,
+            "Distance between initial and final position is {}, greater than tolerance of 1.1e-3",
+            position_distance
+        );
+        assert!(
+            velocity_distance <= 1e-8,
+            "Distance between initial and final velocity is {}, greater than tolerance of 1e-8",
+            velocity_distance
+        );
     }
 
     // Earth's orbit
@@ -163,6 +204,24 @@ mod tests {
             arg_periapsis,
             mean_anomaly_epoch,
             epoch: *J2000,
+        }
+    }
+
+    fn stationary_earth() -> StateVector {
+        StateVector {
+            position: DVec3::new(
+                -2.650257688971310e7,
+                1.446939556279910e8,
+                -1.704331902042031e2,
+            ) * 1.0e3,
+            velocity: DVec3::ZERO,
+        }
+    }
+
+    fn stationary_near_origin() -> StateVector {
+        StateVector {
+            position: DVec3::new(1.0, 1.0, 1.0),
+            velocity: DVec3::ZERO,
         }
     }
 }

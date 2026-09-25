@@ -3,10 +3,9 @@
 use crate::bodies::CentralBody;
 use crate::integrate::{integrate, two_body};
 use crate::plan::{FlightPlan, Maneuver};
-use crate::time::{Clock, TimeStep, seconds_since};
+use crate::time::{Clock, TimeStep};
 use crate::vectors::{Orbit, StateVector};
-use glam::DVec3;
-struct Ship {
+pub struct Ship {
     /// Gotta have a name
     name: String,
     /// Position and Velocity at time on clock
@@ -44,32 +43,41 @@ impl Ship {
     }
 
     pub fn fly(&mut self, plan: &FlightPlan) -> StateVector {
-        // reference gets shared between total_time and both accel_at calls, can't fall out of sync
-        let reference = self.clock.now();
-        let total_time: f64 = plan
-            .maneuvers()
-            .map(|m| match m {
-                Maneuver::Burn(b) => seconds_since(reference, b.start()) + b.duration(),
-            })
-            .fold(0.0, f64::max);
-        let new_state = integrate(
-            self.current_state,
-            0.0,
-            total_time,
-            substep_calculator(total_time),
-            |t, s| {
-                two_body(self.center.mu(), s)
-                    + plan
-                        .maneuvers()
-                        .map(|m| match m {
+        for m in plan.maneuvers() {
+            let reference = self.clock.now();
+            let start = match m {
+                Maneuver::Burn(b) => b.start(),
+            };
+            if start > reference {
+                let duration = (start - reference).to_seconds();
+                self.current_state = integrate(
+                    self.current_state,
+                    0.0,
+                    duration,
+                    substep_calculator(duration),
+                    |_t, s| two_body(self.center.mu(), s),
+                );
+                self.clock.advance(TimeStep::Seconds(duration));
+            }
+            let duration = match m {
+                Maneuver::Burn(b) => b.duration(),
+            };
+            let new_state = integrate(
+                self.current_state,
+                0.0,
+                duration,
+                substep_calculator(duration),
+                |t, s| {
+                    two_body(self.center.mu(), s)
+                        + match m {
                             Maneuver::Burn(b) => b.accel_at(reference, t),
-                        })
-                        .sum::<DVec3>()
-            },
-        );
-        self.clock.advance(TimeStep::Seconds(total_time));
-        self.current_state = new_state;
-        new_state
+                        }
+                },
+            );
+            self.current_state = new_state;
+            self.clock.advance(TimeStep::Seconds(duration));
+        }
+        self.current_state
     }
 
     pub fn orbit(&self) -> Orbit {
