@@ -62,6 +62,14 @@ cargo member unless WASM.
   thrust-only kinematic stepper: the pinned perturbation feature reuses
   the integrator for pure coasting, which is only possible if the
   acceleration term is pluggable.
+  - MEASURED 2026-09-25 — "negligible" holds relative to THRUST, NOT
+    relative to the 1,000 km budget. Earth → Pallas at 2.943 m/s² (0.3 g),
+    `Planner::fixed_accel` plan flown by `Ship::fly` with Sol gravity on,
+    origin at rest: 6.27 d flight, **607,500 km miss** (~600× budget).
+    Solar gravity at 1 AU is ~0.2% of the thrust, but 0.2% of a 3e11 m
+    trip is ~6e8 m. The separation of the two pieces of code still stands;
+    what changes is that a closed-form plan is only an INITIAL GUESS, which
+    the integrator must then correct (see roadmap B2).
 - **Expanse travel = brachistochrone burns** (accelerate, flip, decelerate).
   Orbital mechanics applies to coasting.
 - **Numerical integration only for ships under thrust** (plus the pinned
@@ -197,12 +205,14 @@ cargo member unless WASM.
 `cargo test --workspace`. Warnings are errors in CI. rust-toolchain.toml
 pins stable + components.
 
-## Current state (as of 2026-09-03)
+## Current state (as of 2026-09-25)
 
-Head is f913713 on branch `planners-and-solvers`, pushed, working tree
+Head is 7275f17 on branch `planners-and-solvers`, pushed, working tree
 clean. `burn_integrator` is merged into master; the current branch is
-branched off that merge. 41 sim-core tests, fmt/clippy/tests all green
-(full CI gate run, not just `cargo test`).
+branched off that merge and is NOT yet merged (15 commits since the last
+CLAUDE.md snapshot at f913713). 45 sim-core tests, fmt/clippy/tests all
+green (full CI gate run, not just `cargo test`). sim-cli, sim-server,
+sim-protocol and sim-store are still hello-world stubs.
 
 Roadmap items 2 AND 3 are COMPLETE, and as of 2026-08-21 so is the wiring
 between them: `accel_at` is fed to `integrate` through a composed closure
@@ -211,17 +221,37 @@ integrator itself is validated four independent ways: an exact analytic
 oracle (a), a convergence rate (b), a conservation law (c), and a
 closed-form error model (d).
 
-In progress: roadmap item 4, the closed-form burn PLANNER. Scaffolding
-landed 2026-08-29/30 — `plan.rs` (Maneuver/FlightPlan), `CentralBody` in
-bodies.rs, and `Orbit` in vectors.rs; made `pub` with derives in 9be9019.
-Stage 1 (1-D brachistochrone) is now PINNED BY A TEST as of 2026-09-03
-(d882720, f913713) — but it is a hand-built `FlightPlan` flown through
-`integrate`, NOT a solver. STILL NO SOLVER EXISTS: nothing yet computes
-burn times from a distance. The test is the oracle the solver will be
-checked against, written first deliberately.
-There is still no `Ship` type — `ship.rs` and `systems.rs` are empty files
-— so nothing yet OWNS a (StateVector, Epoch, burns) triple, and the powered
-closure lives only in tests.
+In progress: roadmap item 4, the burn PLANNER. As of 2026-09-25 a SOLVER
+EXISTS: `Planner::fixed_accel` (planner.rs) emits a two-burn
+brachistochrone to a moving target, and `Ship::fly` (ship.rs) is the first
+PRODUCTION caller of the gravity + thrust closure. Stages 1–3 are done in
+the μ = 0 world (see the planner.rs entry). The planner does NOT yet
+handle a moving origin, velocity matching at arrival, or gravity, and each
+of those alone blows the budget by 10²–10⁴× (measured, see planner.rs).
+`systems.rs` is still an empty file.
+
+OPEN BUGS found 2026-09-25 (both reproduced in a scratch copy, neither
+covered by a test):
+- **`Ship::fly` misaligns any burn that follows a coast gap.** `reference`
+  is captured from `self.clock.now()` BEFORE the pre-burn coast advances
+  the clock, then the burn is integrated from t0 = 0 against that stale
+  reference, so `accel_at` sees the window shifted late by the gap length.
+  Receipts: a 600 s, 10 m/s² burn after a 1000 s gap → final |v| = 0 (never
+  fires; expected 6000). Same burn after a 200 s gap → 3600 (only 360 of
+  600 s fire). Every existing test has abutting burns starting at clock
+  time, so the gap branch has never executed under test. This is exactly
+  the "same `reference` for `t0` and the burn query" invariant, broken by
+  a variable captured before a mutation.
+- **`Trajectory::from_state` turns a zero-velocity state into a NaN orbit
+  under nonzero μ.** The radial test `h_len / (r_len * v_len) <= 1e-8` is
+  0/0 = NaN when v = 0; NaN compares false, so it falls through, ε = −μ/r
+  < 0, and it classifies as `Elliptic` with e = 1.0, inclination NaN, ω
+  NaN. Any later `state_at`/`current_state` then fails `solve_kepler` with
+  NotElliptical. Under μ = 0 (`CentralBody::None`) the same state lands in
+  `Escape` by luck (ε = 0 ≥ 0), which is why the planner tests never saw
+  it. A ship at rest is the limit of PureRadial (h = 0) and belongs there.
+  Written as `h_len <= 1e-8 * r_len * v_len` the comparison is 0 <= 0,
+  true, no division, no NaN.
 
 
 Done: workspace scaffold, README, MIT license, .gitignore (/target, .idea/,
@@ -677,10 +707,12 @@ Vec<Maneuver> }`, and `FlightPlan::maneuvers()` returning
 - `pub mod plan;` plus `pub` on both types and Debug/Clone/Copy/serde
   derives landed in 9be9019. `maneuvers` the FIELD stays private; the test
   module can still write `FlightPlan { maneuvers }` because it is a CHILD
-  module of `plan`. An external constructor (`FlightPlan::new` or
-  `FromIterator`) does not exist yet and will be needed the moment the
-  solver lives outside this file — see stage 3 in the roadmap, which moves
-  it to `planner.rs`.
+  module of `plan`. `FlightPlan::new(Vec<Maneuver>) -> Self` landed
+  2026-09 for the planner.rs solver. It validates NOTHING, yet `Ship::fly`
+  silently ASSUMES the maneuvers are sorted by start and non-overlapping
+  (see ship.rs). That unenforced invariant is the same shape as the
+  un-validated `Burn` deserialize that `try_from` fixed; making `new`
+  return a Result is roadmap A3.
 - `Maneuver::Burn(Burn)` — variant sharing a type's name is fine and
   idiomatic (cf. `serde_json::Value::String(String)`); variants and types
   are in different namespaces. Verified clippy-clean under `-D warnings`.
@@ -745,12 +777,130 @@ Vec<Maneuver> }`, and `FlightPlan::maneuvers()` returning
     to 1e-4 (matching `mu_zero_whole_span`) is an OUTSTANDING chore.
   - Assertion-message drift, same class as `pure_kinematics`: both messages
     hardcode "greater than 1e-7". They will misreport the moment either
-    tolerance is widened. Fix in the same edit.
+    tolerance is widened. Fix in the same edit. STILL OUTSTANDING
+    2026-09-25. (The `pure_kinematics` message and the `mean_motion` doc
+    drift noted elsewhere ARE fixed.)
+
+`Orbit` methods (vectors.rs, added 2026-09):
+- `Orbit::from_state(state, center, epoch)` — wraps
+  `Trajectory::from_state` with `center.mu()`, so μ is never passed by hand.
+- `state_at(&self, epoch) -> Result<StateVector, KeplerError>` — Elliptic
+  goes propagate → solve → `elements_to_state_vector`; Escape/PureRadial
+  INTEGRATE gravity-only from the stored epoch at the private
+  `COAST_SUBSTEP = 60.0`. Cost: every call re-integrates from the stored
+  epoch, and the planner calls it once per iteration. Earlier-than-epoch
+  queries on those two variants trip `integrate`'s `dt_total >= 0`
+  debug_assert (the doc comment says so); the Elliptic branch works both
+  ways.
+- `epoch(self)`, `current_state(&self)` (= `state_at(self.epoch())`).
+- Side effect: vectors.rs now imports integrate.rs, which already imports
+  vectors.rs (for StateVector). A circular MODULE dependency is legal
+  inside one crate but blurs the "vectors.rs owns the Cartesian world"
+  split. Low priority; revisit if a `propagate.rs` ever makes sense.
+
+`CentralBody::None` (bodies.rs, 2026-09) — `mu() = 0.0`, flat space for
+tests. Every μ = 0 test now goes through it. Two hazards: the name shadows
+`Option::None` under any glob import of the variants, and under μ = 0
+`Trajectory::from_state` classifies EVERY state as Escape/PureRadial (ε =
+v²/2 ≥ 0), so `state_at` always integrates. Consider renaming (e.g.
+`FlatSpace`) — roadmap A3.
+
+`TimeStep::Seconds(f64)` (time.rs, 2026-09) — arbitrary-length clock
+advance for `Ship::fly`. The f64 payload forced dropping `Eq` from the
+derive (f64 has no `Eq` because NaN != NaN, the same reason `BurnError`
+has no `PartialEq`).
+
+`ship.rs` — NEW 2026-09, first production caller of the gravity + thrust
+closure. `Ship { name, current_state, center: CentralBody, clock: Clock,
+transponder_id, mass, max_accel }`, all private, `Ship::new` with no
+validation, getters `orbit()` and `now()` only. NO derives (no Debug,
+Clone or serde yet).
+- `fly(&mut self, &FlightPlan) -> StateVector` walks the maneuvers ONE AT
+  A TIME: if the burn starts after `clock.now()`, it coasts the gap
+  (gravity only) and advances the clock; then it integrates the burn alone
+  over exactly its duration with t0 = 0.0 and advances again. This
+  implements the "reference = the state's own epoch, t0 always 0.0"
+  decision. It REPLACES the `&[Burn]` sum decision (a075c2c). The upside
+  is real: each `integrate` call spans exactly one burn, so `h =
+  dur/ceil(dur/60)` puts the burn boundaries ON substep boundaries and no
+  step is ever half-powered. The cost is that overlapping burns are no
+  longer summed, and a burn starting before `clock.now()` is silently
+  truncated (its window starts at negative t). Both are fine ONLY if
+  FlightPlan guarantees sorted, non-overlapping, not-in-the-past burns,
+  and nothing enforces that yet.
+- Has the gap BUG described under "OPEN BUGS" above.
+- `max_accel` and `mass` are stored but never read. Nothing checks a
+  plan's accel against `max_accel`: the constraint finally has a home and
+  is not enforced there yet. These four fields (`name`, `transponder_id`,
+  `mass`, `max_accel`) are the ONLY thing keeping `#![allow(dead_code)]`
+  alive in lib.rs. Verified 2026-09-25: removing the allow fails clippy
+  on exactly those four fields and nothing else.
+- `substep_calculator` is a stub returning 60.0.
+- 1 test, `test_flight`: four 6000 s, 100 m/s² burns, abutting, that
+  cancel pairwise under μ = 0, so the ship must end at `r0 + v0·24000`
+  with `v0` unchanged. Nonzero `v0` gives it coverage the planner tests
+  lack. It exercises only the abutting path, never the coast gap.
+
+`planner.rs` — NEW 2026-09, THE SOLVER. Moved out of plan.rs at stage 3 as
+planned (it depends on orbits/vectors; plan.rs does not).
+- `PlanError` (thiserror): `Kepler(#[from])`, `Burn(#[from])` both
+  `#[error(transparent)]`, plus `NotConverged { time }` and
+  `InvalidAccel { accel }`. `#[from]` is what lets `?` convert.
+- `Planner { origin: Orbit, target: Orbit }`, Copy.
+  `fixed_accel(self, accel) -> Result<FlightPlan, PlanError>` rejects
+  non-finite or `<= 0.0` accel (NOTE: zero is an ERROR here but VALID in
+  `Burn::new`. That is consistent: a zero-accel burn is a harmless
+  degenerate leg, while a zero-accel PLAN never arrives). It then emits
+  two burns of `time/2` each, the second starting exactly where the first
+  ends, with direction and `-direction`.
+- `solve_flight_time` is FIXED-POINT iteration, not Newton (the roadmap
+  said "Newton flavour"): `t ← 2√(|target(t0+t) − origin|/a)`, 30-iter
+  cap, converged when successive t differ by ≤ 1 s. Fixed point converges
+  when the target's speed is small next to the ship's mean transit speed,
+  true for any torch ship; a very weak drive could fail to converge.
+- Subtlety: on convergence it returns `new_time` but aims at the target's
+  position at `guess_time`. The arrival miss is therefore bounded by
+  |Δt| × target speed ≈ 1 s × ~17 km/s ≈ 17 km, NOT by 0.
+- WHAT IT IGNORES (all measured 2026-09-25, Earth → Pallas at 2.943 m/s²,
+  6.27 d, flown by `Ship::fly` with Sol gravity):
+  - origin VELOCITY (reads only `current_state().position`): with Earth's
+    ~30 km/s heliocentric velocity, the miss is **1.635e7 km**, arriving
+    at 11.4 km/s relative. This is roadmap stage 4.
+  - target velocity at ARRIVAL: the ship arrives at rest, the target does
+    not. Even from rest, the relative velocity at arrival is **22.4 km/s**.
+    An intercept, not a rendezvous.
+  - GRAVITY: origin at rest, Sol gravity only, miss **607,500 km**.
+  - centers: nothing checks `origin.center == target.center`.
+    `moving_target` mixes `None` (origin) with `Sol` (target), which is fine
+    for a test but meaningless under patched conics.
+  - `max_accel`: `accel` is a bare parameter, no `Ship` involved.
+- Tests (3): `invalid_accel` (zero/inf/neg/NaN, `let … else` payload
+  binding, matching the burns.rs pattern; its final
+  `assert!(a_nan.is_nan())` asserts the fixture, not the code, and can be
+  deleted). `stationary_target` (μ = 0, rest-to-rest to near-origin,
+  recorded miss 1.0911e-3 m, **tolerance 1.1e-3: 1.008× headroom**. That
+  is the same knife-edge mistake the gotchas section records twice.
+  Re-set to a few ×). `moving_target` (μ = 0 origin at rest → Pallas on
+  Sol rails, recorded miss 703 m, tolerance 2e3). The 2e3 is TIGHTER than
+  the ~17 km the solver's 1 s tolerance guarantees, so 703 m is a
+  convergence-luck value for this fixture; a different target or accel
+  can legally miss by 10 km and fail. Either derive the tolerance from
+  the solver's bound or tighten the solver's convergence criterion (in
+  DISTANCE, which is what the budget is in).
+- Fixture duplication: the EMB and Pallas J2000 element sets are now
+  transcribed in FOUR files (orbits.rs, vectors.rs, integrate.rs,
+  planner.rs). Per the DRY rule, transcribed setup gets ONE home. Across
+  modules that means a crate-level `#[cfg(test)]` fixtures module.
+  planner.rs's `test_orbit_one` also uses `Sol.mu()` for EMB (the wrong
+  two-body μ per bodies.rs). Harmless here because nothing compares it to
+  Horizons, but it is the silent-disagreement risk the rule exists for.
+  The two planner tests and `test_flight` also each spell out the same
+  seven-argument `Ship::new` setup, which is a helper candidate.
 
 3D migration (branch adventure-to-the-third-dimension): COMPLETE.
 Checklist items 1–7 plus `Trajectory::from_state` in full 3D all done.
 
-fmt/clippy/tests all green as of 2026-09-03 (41 sim-core tests), full
+fmt/clippy/tests all green as of 2026-09-25 (45 sim-core tests), full
 CI gate run (fmt + clippy --all-targets -D warnings + test --workspace).
 
 Next up, in order (REORDERED 2026-08-08 — the burn integrator was moved
@@ -798,10 +948,13 @@ powered-leg tests — see the integrate.rs entry in Current state.
 Acceleration is gravity + thrust, NEVER thrust alone. The closure still
 lives only in tests; no production caller exists because no `Ship` does.
 
-DECIDED but NOT BUILT — the eventual home of that closure. It needs an
+BUILT 2026-09 as `Ship::fly` (see ship.rs in Current state). The first
+decision below is implemented, but with the coast-gap bug. The second was
+SUPERSEDED by one-burn-per-`integrate`-call for substep alignment.
+Original reasoning kept for the record. It needs an
 owner that holds three things at once: the ship's StateVector, WHAT TIME
-that state is, and the active burns. That is a `Ship` type (`ship.rs` is
-empty). Two decisions banked while the reasoning was fresh:
+that state is, and the active burns. That is a `Ship` type. Two decisions
+banked while the reasoning was fresh:
   - **Make `reference` the epoch of the state being propagated, so `t0` is
     always 0.0.** The one invariant `accel_at` cannot check is that the
     caller used the same `reference` for `t0` and for the burn query;
@@ -820,8 +973,10 @@ empty). Two decisions banked while the reasoning was fresh:
     identity element with no special-casing. Own with `Vec`, accept with
     `&[…]`.
 4. The burn planner (closed-form; solve flip time / duration / Δv for a
-   target). IN PROGRESS as of 2026-08-29 — types scaffolded (see `plan.rs`
-   and `CentralBody`/`Orbit` above), NO SOLVER WRITTEN. Deferred until now
+   target). IN PROGRESS. Stages 1–3 DONE in the μ = 0 world as of
+   2026-09-25 (`Planner::fixed_accel`, see planner.rs). Stage 4 and the
+   gravity correction are the remaining work and are broken out as B1/B2
+   in the roadmap at the end of this list. Deferred until now
    deliberately: it needs a trustworthy integrator to check against, and it
    did not need to exist for 1–3 to be correct. The payoff of that ordering
    is that the two check each other — the planner emits Burns, the
@@ -836,18 +991,22 @@ empty). Two decisions banked while the reasoning was fresh:
       having covered `a·t_leg²`. The INVERSE — given d and a, emit the
       Burns — is not written. That inversion is the actual solver and is
       the first thing stage 2 needs.
+      The inverse now exists as `Planner::fixed_accel`.
    2. **3-D, stationary target.** Same math, direction is the unit vector
       toward the target. First point that emits real `Burn`s and can
-      round-trip through `integrate`.
+      round-trip through `integrate`. DONE (`stationary_target`).
    3. **Moving target.** Arrival time and flight time are mutually
       dependent: guess arrival, propagate the target on its Kepler rails,
       recompute distance and flight time, iterate. Same Newton flavour as
       `solve_kepler`. This is ALSO the seam where the solver moves out of
       `plan.rs` into `planner.rs` — it is where the solver stops being
       pure algebra and starts depending on orbits.rs, giving it a
-      genuinely different dependency profile from the types.
+      genuinely different dependency profile from the types. DONE
+      (`moving_target`, 7275f17). Implemented as fixed-point iteration,
+      not Newton, and the move to planner.rs happened as planned.
    4. **Nonzero initial velocity.** Breaks the symmetry; the flip is no
-      longer at the midpoint.
+      longer at the midpoint. NOT STARTED. See B1 below, which widens it to
+      include matching the target's velocity at arrival.
    Planner needs a MAX-ACCELERATION input — the ship property deliberately
    kept out of `Burn` (a Burn cannot know whether 5 g is impossible or just
    unpleasant). Item 4 is where that constraint finally needs a home.
@@ -863,6 +1022,51 @@ empty). Two decisions banked while the reasoning was fresh:
    (~43,000 km/yr on Pallas), Saturn is a few percent of Jupiter,
    Uranus/Neptune noise. Truncate the perturber sum by error budget,
    same method as test tolerances: measure, compare, keep what matters.
+
+ROADMAP (proposed 2026-09-25, supersedes the order of items 4–6 above).
+Principle unchanged from the 2026-08-08 reorder: build sim-core capability
+before the surfaces that expose it. The new fact is that the planner works
+only in flat space from rest, so "plan a real trip" is not yet a sim-core
+capability, and a CLI built now would mostly display wrong answers.
+
+A. Harden what exists (small, do first, each one a failing test first):
+   A1. Fix the `Ship::fly` coast-gap bug and add a gap test.
+   A2. Fix the zero-velocity NaN in `Trajectory::from_state` and add a
+       `test_at_rest` (μ = Sol, v = 0 → PureRadial).
+   A3. Invariants and hygiene: validating `FlightPlan::new` (sorted,
+       non-overlapping; Result). `fly` or the planner checks
+       `max_accel`. Ship getters, then delete `#![allow(dead_code)]`.
+       Rename `CentralBody::None`. Planner rejects mismatched centers.
+   A4. Test hygiene: `stationary_target` 1.008× tolerance,
+       `moving_target` tolerance vs the solver bound,
+       `one_d_brachistochrone` 1e-7 → 1e-4 + messages, a shared
+       element-fixture module, and a `Ship` test helper.
+B. Make the planner physically real (the actual item-4 finish):
+   B1. Boundary velocities: a moving origin (v0) AND matching the
+       target's velocity at arrival (rendezvous, not intercept). Solve in
+       flat space first so an exact oracle exists. With two fixed-heading
+       legs the unknowns are 2 directions + 2 durations = 6, constrained
+       by relative position + relative velocity = 6. This is the repo's
+       first multi-dimensional solve.
+   B2. Gravity correction by SHOOTING: the closed-form plan is the first
+       guess; fly it with `integrate` under real gravity, measure the miss
+       vector, shift the aim point by the miss, re-plan, repeat until the
+       miss is within budget. Keeps planner and integrator as separate
+       code (the settled rule) while letting the integrator be the truth
+       the planner converges on. Receipt to beat: 607,500 km.
+   B3. Merge `planners-and-solvers` to master once B1 is green (the
+       branch is already 15+ commits and a long-lived branch is a
+       conflict magnet).
+C. Ship as a game object: `advance_to(epoch)` that flies PART of a plan
+   (a GM "advance 12 h" lands mid-burn), plan storage on the ship,
+   decoupled fuel scalar ṁ = m·a/(g₀·Isp), serde derives on Ship.
+D. CLI (old item 5): seed bodies from `data/` JSON, `plan`, `fly`,
+   `where` commands. First real `CentralBody` → data mapping.
+E. sim-protocol message enums → sim-server (axum + WS) → frontend spike.
+   sim-store waits until there is state worth persisting (after C).
+F. Deferred physics: SOI detection + patched-conic re-framing (needed for
+   Jovian/Saturnian moon stations), RK4 + the pinned perturbed coast
+   (old item 6).
 
 ## Known gotchas (avoid repeats)
 
@@ -1181,3 +1385,24 @@ empty). Two decisions banked while the reasoning was fresh:
   can shift the last bit. A serde round-trip normalizes TWICE (once in
   `new`, once in `try_from`), so compare directions with a tolerance, never
   `==`. Scalars (f64 through serde_json) DO come back bit-identical.
+- **A value captured BEFORE a mutation goes stale silently** (found
+  2026-09-25, `Ship::fly`). `let reference = self.clock.now();` at the top
+  of the loop, then a coast that advances the clock, then a burn queried
+  against `reference`. The compiler is happy (`reference` is a Copy
+  `Epoch`, and the borrow checker only tracks references, not "this value
+  describes that state"). Read the stale-ness off the symptom: the burn
+  fired for `duration − gap` seconds, or not at all once gap ≥ duration.
+  When a local mirrors mutable state, compute it AFTER the last mutation
+  it must reflect, or better, don't cache it at all.
+- **Tolerance tests written as a DIVISION fail open on zero.**
+  `h / (r * v) <= tol` is NaN when `r * v == 0`, and NaN comparisons are
+  false, so the "is it radial?" branch is skipped exactly in the most
+  radial case of all (v = 0). Multiply instead: `h <= tol * r * v` is
+  `0 <= 0`, true. Same family as the `x >= 0.0` NaN guards: know which
+  way your comparison falls when an operand is NaN.
+- **Code paths no fixture reaches are untested, however green the suite
+  looks.** Both 2026-09-25 bugs sat behind a branch every test skipped:
+  the planner always emits abutting burns starting at clock time (so
+  `fly`'s gap branch never ran), and every μ = 0 fixture routes v = 0
+  into Escape (so the NaN branch never ran). When adding a branch, write
+  the fixture that enters it.

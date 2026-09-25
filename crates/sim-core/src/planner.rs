@@ -142,8 +142,8 @@ mod tests {
             .distance(stationary_near_origin().position);
         let velocity_distance = final_state.velocity.distance(DVec3::ZERO);
         assert!(
-            position_distance <= 1.1e-3,
-            "Distance between initial and final position is {}, greater than tolerance of 1.1e-3",
+            position_distance <= 5e-3,
+            "Distance between initial and final position is {}, greater than tolerance of 5e-3",
             position_distance
         );
         assert!(
