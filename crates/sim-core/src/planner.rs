@@ -153,6 +153,47 @@ mod tests {
         );
     }
 
+    // Recorded miss: 703.2347120924927
+    #[test]
+    fn moving_target() {
+        let center = CentralBody::None;
+        let planner = Planner::new(
+            Orbit::from_state(stationary_earth(), center, *J2000),
+            test_orbit_two(),
+        );
+        let test_plan = planner.fixed_accel(33.333).unwrap();
+        let name = String::from("Test Ship");
+        let current_state = stationary_earth();
+        let clock = Clock::new(*J2000);
+        let transponder_id = String::from("123456789");
+        let mass = 1.0;
+        let max_accel = 1000.0;
+        let mut test_ship = crate::ship::Ship::new(
+            name,
+            current_state,
+            center,
+            clock,
+            transponder_id,
+            mass,
+            max_accel,
+        );
+        let final_state = test_ship.fly(&test_plan);
+        let position_distance = final_state
+            .position
+            .distance(test_orbit_two().state_at(test_ship.now()).unwrap().position);
+        let velocity_distance = final_state.velocity.distance(DVec3::ZERO);
+        assert!(
+            position_distance <= 2e3,
+            "Distance between initial and final position is {}, greater than tolerance of 2e3",
+            position_distance
+        );
+        assert!(
+            velocity_distance <= 1e-8,
+            "Distance between initial and final velocity is {}, greater than tolerance of 1e-8",
+            velocity_distance
+        );
+    }
+
     // Earth's orbit
     fn test_orbit_one() -> Orbit {
         let elements = create_test_elements(

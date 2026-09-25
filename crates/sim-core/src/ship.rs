@@ -5,6 +5,7 @@ use crate::integrate::{integrate, two_body};
 use crate::plan::{FlightPlan, Maneuver};
 use crate::time::{Clock, TimeStep};
 use crate::vectors::{Orbit, StateVector};
+use hifitime::Epoch;
 pub struct Ship {
     /// Gotta have a name
     name: String,
@@ -82,6 +83,9 @@ impl Ship {
 
     pub fn orbit(&self) -> Orbit {
         Orbit::from_state(self.current_state, self.center, self.clock.now())
+    }
+    pub fn now(&self) -> Epoch {
+        self.clock.now()
     }
 }
 /// Helper to calculate substeps from the total time
