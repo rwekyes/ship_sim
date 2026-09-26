@@ -180,12 +180,12 @@ mod tests {
         let velocity_distance = final_state.velocity.distance(expected_velocity);
         assert!(
             position_distance <= 1e-6,
-            "Distance between initial and final position is {}, greater than tolerance of 1e-6",
+            "Distance between initial and expected position is {}, greater than tolerance of 1e-6",
             position_distance
         );
         assert!(
             velocity_distance <= 1e-8,
-            "Distance between initial and final velocity is {}, greater than tolerance of 1e-8",
+            "Distance between initial and expected velocity is {}, greater than tolerance of 1e-8",
             velocity_distance
         );
     }
@@ -236,12 +236,12 @@ mod tests {
         let velocity_distance = final_state.velocity.distance(expected_velocity);
         assert!(
             position_distance <= 1e-6,
-            "Distance between initial and final position is {}, greater than tolerance of 1e-6",
+            "Distance between initial and expected position is {}, greater than tolerance of 1e-6",
             position_distance
         );
         assert!(
             velocity_distance <= 1e-8,
-            "Distance between initial and final velocity is {}, greater than tolerance of 1e-8",
+            "Distance between initial and expected velocity is {}, greater than tolerance of 1e-8",
             velocity_distance
         );
     }
