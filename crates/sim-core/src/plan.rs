@@ -61,12 +61,14 @@ mod tests {
         let velocity_diff = state.velocity.distance(final_state.velocity);
         let position_diff = state.position.distance(final_state.position);
         assert_eq!(
-            velocity_diff.abs(), 0.0,
+            velocity_diff.abs(),
+            0.0,
             "Difference in final and predicted velocities {} is non-zero",
             velocity_diff
         );
         assert_eq!(
-            position_diff.abs()- 7e8, 0.0,
+            position_diff.abs() - 7e8,
+            0.0,
             "Difference in final and predicted positions {} is non-zero",
             position_diff
         );
