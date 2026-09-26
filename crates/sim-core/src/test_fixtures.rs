@@ -45,11 +45,11 @@ pub fn pallas_orbit() -> Orbit {
 }
 
 pub fn stationary_emb_orbit() -> Orbit {
-    Orbit::from_state(stationary_emb(), CentralBody::None, *J2000)
+    Orbit::from_state(stationary_emb(), CentralBody::FlatSpace, *J2000)
 }
 
 pub fn stationary_near_origin_orbit() -> Orbit {
-    Orbit::from_state(stationary_near_origin(), CentralBody::None, *J2000)
+    Orbit::from_state(stationary_near_origin(), CentralBody::FlatSpace, *J2000)
 }
 
 pub fn stationary_near_origin() -> StateVector {

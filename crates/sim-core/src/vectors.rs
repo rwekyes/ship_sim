@@ -41,7 +41,7 @@ impl Trajectory {
         let n = DVec3::Z.cross(h);
         let ecc_vec = v.cross(h) / mu - r.normalize();
         let epsilon = (v_len.powi(2) / 2.0) - (mu / r_len);
-        if h_len <= 1e-8 * r_len * v_len{
+        if h_len <= 1e-8 * r_len * v_len {
             return PureRadial(state, epoch);
         } else if epsilon >= 0.0 {
             return Escape(state, epoch);
@@ -378,6 +378,19 @@ mod tests {
         };
         let traj = Trajectory::from_state(state, mu, *J2000);
         assert!(matches!(traj, PureRadial(_, _)));
+    }
+
+    #[test]
+    fn test_at_rest() {
+        let center = CentralBody::Sol;
+        let state = StateVector {
+            position: DVec3::new(4.0e10, 8.0e10, 1.2e11),
+            velocity: DVec3::ZERO,
+        };
+        let trajectory = Trajectory::from_state(state, center.mu(), *J2000);
+        assert!(matches!(trajectory, PureRadial(_, _)));
+        let orbit = Orbit { center, trajectory };
+        assert!(orbit.current_state().is_ok());
     }
 
     fn test_round_trip(elements: OrbitalElements, expected: [StateVector; 4], mu: f64) {

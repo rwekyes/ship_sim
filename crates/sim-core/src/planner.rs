@@ -61,17 +61,20 @@ fn solve_flight_time(
     accel: f64,
 ) -> Result<(f64, DVec3), PlanError> {
     let target_state = target.current_state()?;
+    let mut old_position = target_state.position;
     let distance = target_state.position.distance(origin_position);
     let mut guess_time = 2.0 * (distance.abs() / accel).sqrt();
     const ITERATIONS: u32 = 30;
-    const TOLERANCE: f64 = 1.0; // seconds
+    const TOLERANCE: f64 = 1.0; // meters
     for _ in 0..ITERATIONS {
         let target_at_guess = target.state_at(origin_time + guess_time.seconds())?;
-        let distance = target_at_guess.position.distance(origin_position);
+        let new_position = target_at_guess.position;
+        let distance = new_position.distance(origin_position);
         let new_time = 2.0 * (distance / accel).sqrt();
-        if (new_time - guess_time).abs() <= TOLERANCE {
+        if new_position.distance(old_position) <= TOLERANCE {
             return Ok((new_time, target_at_guess.position - origin_position));
         }
+        old_position = new_position;
         guess_time = new_time;
     }
 
@@ -115,7 +118,7 @@ mod tests {
     // Recorded miss: 0.0010911002640611102
     #[test]
     fn stationary_target() {
-        let center = CentralBody::None;
+        let center = CentralBody::FlatSpace;
         let planner = Planner::new(stationary_emb_orbit(), stationary_near_origin_orbit());
         let test_plan = planner.fixed_accel(33.333).unwrap();
         let current_state = stationary_emb();
@@ -137,10 +140,10 @@ mod tests {
         );
     }
 
-    // Recorded miss: 703.2347120924927
+    // Recorded miss: 0.002950791009326781
     #[test]
     fn moving_target() {
-        let center = CentralBody::None;
+        let center = CentralBody::FlatSpace;
         let planner = Planner::new(stationary_emb_orbit(), pallas_orbit());
         let test_plan = planner.fixed_accel(33.333).unwrap();
         let current_state = stationary_emb();
@@ -151,8 +154,8 @@ mod tests {
             .distance(pallas_orbit().state_at(test_ship.now()).unwrap().position);
         let velocity_distance = final_state.velocity.distance(DVec3::ZERO);
         assert!(
-            position_distance <= 2e3,
-            "Distance between initial and expected position is {}, greater than tolerance of 2e3",
+            position_distance <= 1.0e-1,
+            "Distance between initial and expected position is {}, greater than tolerance of 1e-1",
             position_distance
         );
         assert!(

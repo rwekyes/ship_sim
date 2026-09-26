@@ -134,6 +134,7 @@ mod tests {
     use crate::test_fixtures::test_ship;
     use crate::time::J2000;
     use glam::DVec3;
+    // Recorded position miss - 0.0000002068525054481194
     #[test]
     fn test_flight() {
         let test_burn1 = Burn::new(*J2000, 6000.0, 100.0, DVec3::new(0.11, -4.2, 0.77777)).unwrap();
@@ -171,7 +172,7 @@ mod tests {
             position: initial_position,
             velocity: initial_velocity,
         };
-        let center = CentralBody::None;
+        let center = CentralBody::FlatSpace;
         let mut test_ship = test_ship(current_state, center);
         let final_state = test_ship.fly(&test_plan);
         let expected_position = initial_position + initial_velocity * 24000.0;
@@ -190,6 +191,7 @@ mod tests {
         );
     }
 
+    // Recorded position miss - 0.0000002068525054481194
     #[test]
     fn fly_with_coast() {
         let test_burn1 = Burn::new(*J2000, 6000.0, 100.0, DVec3::new(0.11, -4.2, 0.77777)).unwrap();
@@ -227,7 +229,7 @@ mod tests {
             position: initial_position,
             velocity: initial_velocity,
         };
-        let center = CentralBody::None;
+        let center = CentralBody::FlatSpace;
         let mut test_ship = test_ship(current_state, center);
         let final_state = test_ship.fly(&test_plan);
         let expected_position = initial_position + initial_velocity * 24600.0;
