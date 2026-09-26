@@ -90,6 +90,34 @@ impl Ship {
     pub fn now(&self) -> Epoch {
         self.clock.now()
     }
+
+    pub fn name(&self) -> &String {
+        &self.name
+    }
+
+    pub fn update_name(&mut self, name: String) {
+        self.name = name;
+    }
+
+    pub fn current_state(&self) -> &StateVector {
+        &self.current_state
+    }
+
+    pub fn center(&self) -> &CentralBody {
+        &self.center
+    }
+
+    pub fn transponder_id(&self) -> &String {
+        &self.transponder_id
+    }
+
+    pub fn mass(&self) -> f64 {
+        self.mass
+    }
+
+    pub fn max_accel(&self) -> f64 {
+        self.max_accel
+    }
 }
 /// Helper to calculate substeps from the total time
 /// Currently a stub, will need to see how substeps effect performance before I implement it.
