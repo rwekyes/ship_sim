@@ -41,7 +41,7 @@ impl Trajectory {
         let n = DVec3::Z.cross(h);
         let ecc_vec = v.cross(h) / mu - r.normalize();
         let epsilon = (v_len.powi(2) / 2.0) - (mu / r_len);
-        if h_len / (r_len * v_len) <= 1e-8 {
+        if h_len <= 1e-8 * r_len * v_len{
             return PureRadial(state, epoch);
         } else if epsilon >= 0.0 {
             return Escape(state, epoch);
