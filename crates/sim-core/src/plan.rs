@@ -60,14 +60,14 @@ mod tests {
         });
         let velocity_diff = state.velocity.distance(final_state.velocity);
         let position_diff = state.position.distance(final_state.position);
-        assert!(
-            velocity_diff.abs() < 1e-7,
-            "Difference in final and predicted velocities {} is greater than 1e-7",
+        assert_eq!(
+            velocity_diff.abs(), 0.0,
+            "Difference in final and predicted velocities {} is non-zero",
             velocity_diff
         );
-        assert!(
-            (position_diff - 7e8).abs() < 1e-7,
-            "Difference in final and predicted positions {} is greater than 1e-7",
+        assert_eq!(
+            position_diff.abs()- 7e8, 0.0,
+            "Difference in final and predicted positions {} is non-zero",
             position_diff
         );
     }
