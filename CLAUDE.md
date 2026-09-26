@@ -185,9 +185,17 @@ cargo member unless WASM.
   with no assertion semantics — transcribed element structs, "build state,
   integrate, measure" plumbing — gets a helper, because a re-transcription
   that updates one copy and not the other makes two tests silently disagree
-  about what orbit they are testing. Applied in `integrate.rs`:
-  `emb_j2000_elements` / `kepler_miss` extracted, `coast_vs_horizons`
-  vectors left inline.
+  about what orbit they are testing. Applied in `integrate.rs`
+  (`kepler_miss` extracted, `coast_vs_horizons` vectors left inline) and,
+  as of 2026-09-25, crate-wide: transcribed setup lives in
+  `src/test_fixtures.rs` (see Current state), expected values do not.
+- **Shared test setup goes in `test_fixtures.rs`**, a `#[cfg(test)] pub mod`
+  declared in lib.rs, so it compiles only for sim-core's own tests and
+  never ships. NOT `tests/` (integration tests are separate crates that see
+  only the pub API; the unit tests in `src/` cannot reach them). `cfg(test)`
+  code is also invisible to OTHER crates' tests; if sim-store/server ever
+  need these fixtures, that is a dev-dependency crate or a feature flag,
+  not a reason to drop the `cfg`.
 - **Prefer asserting a RELATIONSHIP over a second absolute tolerance** when
   the claim is about a relationship. A convergence test that just asserts
   `miss < some_number` at a smaller step is a second magnitude test wearing
@@ -207,12 +215,14 @@ pins stable + components.
 
 ## Current state (as of 2026-09-25)
 
-Head is 7275f17 on branch `planners-and-solvers`, pushed, working tree
-clean. `burn_integrator` is merged into master; the current branch is
-branched off that merge and is NOT yet merged (15 commits since the last
-CLAUDE.md snapshot at f913713). 45 sim-core tests, fmt/clippy/tests all
-green (full CI gate run, not just `cargo test`). sim-cli, sim-server,
-sim-protocol and sim-store are still hello-world stubs.
+Head is 74c0b08 on branch `planners-and-solvers` (fly() coast fix +
+`fly_with_coast`). The working tree carries an UNCOMMITTED refactor: the
+new `test_fixtures.rs` module plus the call-site changes in six test
+modules. `burn_integrator` is merged into master; the current branch is
+branched off that merge and is NOT yet merged. 46 sim-core tests,
+fmt/clippy/tests all green on the working tree (full CI gate run, not just
+`cargo test`). sim-cli, sim-server, sim-protocol and sim-store are still
+hello-world stubs.
 
 Roadmap items 2 AND 3 are COMPLETE, and as of 2026-08-21 so is the wiring
 between them: `accel_at` is fed to `integrate` through a composed closure
@@ -230,18 +240,17 @@ handle a moving origin, velocity matching at arrival, or gravity, and each
 of those alone blows the budget by 10²–10⁴× (measured, see planner.rs).
 `systems.rs` is still an empty file.
 
-OPEN BUGS found 2026-09-25 (both reproduced in a scratch copy, neither
-covered by a test):
-- **`Ship::fly` misaligns any burn that follows a coast gap.** `reference`
-  is captured from `self.clock.now()` BEFORE the pre-burn coast advances
-  the clock, then the burn is integrated from t0 = 0 against that stale
-  reference, so `accel_at` sees the window shifted late by the gap length.
-  Receipts: a 600 s, 10 m/s² burn after a 1000 s gap → final |v| = 0 (never
-  fires; expected 6000). Same burn after a 200 s gap → 3600 (only 360 of
-  600 s fire). Every existing test has abutting burns starting at clock
-  time, so the gap branch has never executed under test. This is exactly
-  the "same `reference` for `t0` and the burn query" invariant, broken by
-  a variable captured before a mutation.
+FIXED 2026-09-25 (74c0b08): **`Ship::fly` misaligned any burn that
+followed a coast gap.** `reference` was captured from `self.clock.now()`
+BEFORE the pre-burn coast advanced the clock, so `accel_at` saw the window
+shifted late by the gap length (a 600 s burn after a 1000 s gap never
+fired; after a 200 s gap only 360 s fired). Now `reference` is read after
+the coast. Guarded by `fly_with_coast` (see ship.rs), which was verified to
+FAIL against the old code with a 703,800,000 m miss while `test_flight`
+stays green on it. So `fly_with_coast` is the only test guarding this bug.
+
+OPEN BUG found 2026-09-25 (reproduced in a scratch copy, not covered by a
+test, roadmap A2):
 - **`Trajectory::from_state` turns a zero-velocity state into a NaN orbit
   under nonzero μ.** The radial test `h_len / (r_len * v_len) <= 1e-8` is
   0/0 = NaN when v = 0; NaN compares false, so it falls through, ε = −μ/r
@@ -558,8 +567,10 @@ expression.
     addition, checked by the two differential tests. This is a decision,
     not an oversight; say so in any future review.
 - Test-module helpers (extracted 2026-08-09, commit dced990):
-  `emb_j2000_elements() -> OrbitalElements` (the transcribed JPL fixture)
-  and `kepler_miss(substep: f64) -> f64` (build state → integrate →
+  `emb_j2000_elements() -> OrbitalElements` (the transcribed JPL fixture;
+  DELETED 2026-09-25, all three integrate.rs tests now use
+  `test_fixtures::emb_elements()`) and `kepler_miss(substep: f64) -> f64`
+  (build state → integrate →
   distance vs `position_at_dt`). Extracted because the two Kepler-oracle
   tests are the SAME experiment at two step sizes; duplicating transcribed
   Horizons data across tests is the failure mode this repo has already been
@@ -710,9 +721,13 @@ Vec<Maneuver> }`, and `FlightPlan::maneuvers()` returning
   module of `plan`. `FlightPlan::new(Vec<Maneuver>) -> Self` landed
   2026-09 for the planner.rs solver. It validates NOTHING, yet `Ship::fly`
   silently ASSUMES the maneuvers are sorted by start and non-overlapping
-  (see ship.rs). That unenforced invariant is the same shape as the
-  un-validated `Burn` deserialize that `try_from` fixed; making `new`
-  return a Result is roadmap A3.
+  (see ship.rs). DEFERRED by decision 2026-09-25: the doc comment on `fly`
+  states the precondition and puts enforcement "either in the UI layer or
+  Planner methods". Know the trade: the planner can guarantee it for
+  plans it EMITS, but a plan that arrives any other way (deserialized
+  from the wire or the DB, hand-built by a GM) reaches `fly` unchecked.
+  That is the same gap `#[serde(try_from)]` closed for `Burn`. Revisit
+  when sim-protocol starts carrying FlightPlans.
 - `Maneuver::Burn(Burn)` — variant sharing a type's name is fine and
   idiomatic (cf. `serde_json::Value::String(String)`); variants and types
   are in different namespaces. Verified clippy-clean under `-D warnings`.
@@ -803,7 +818,7 @@ tests. Every μ = 0 test now goes through it. Two hazards: the name shadows
 `Option::None` under any glob import of the variants, and under μ = 0
 `Trajectory::from_state` classifies EVERY state as Escape/PureRadial (ε =
 v²/2 ≥ 0), so `state_at` always integrates. Consider renaming (e.g.
-`FlatSpace`) — roadmap A3.
+`FlatSpace`) — roadmap A3. Not renamed as of 2026-09-25.
 
 `TimeStep::Seconds(f64)` (time.rs, 2026-09) — arbitrary-length clock
 advance for `Ship::fly`. The f64 payload forced dropping `Eq` from the
@@ -826,20 +841,41 @@ Clone or serde yet).
   step is ever half-powered. The cost is that overlapping burns are no
   longer summed, and a burn starting before `clock.now()` is silently
   truncated (its window starts at negative t). Both are fine ONLY if
-  FlightPlan guarantees sorted, non-overlapping, not-in-the-past burns,
-  and nothing enforces that yet.
-- Has the gap BUG described under "OPEN BUGS" above.
-- `max_accel` and `mass` are stored but never read. Nothing checks a
-  plan's accel against `max_accel`: the constraint finally has a home and
-  is not enforced there yet. These four fields (`name`, `transponder_id`,
-  `mass`, `max_accel`) are the ONLY thing keeping `#![allow(dead_code)]`
-  alive in lib.rs. Verified 2026-09-25: removing the allow fails clippy
-  on exactly those four fields and nothing else.
-- `substep_calculator` is a stub returning 60.0.
-- 1 test, `test_flight`: four 6000 s, 100 m/s² burns, abutting, that
-  cancel pairwise under μ = 0, so the ship must end at `r0 + v0·24000`
-  with `v0` unchanged. Nonzero `v0` gives it coverage the planner tests
-  lack. It exercises only the abutting path, never the coast gap.
+  FlightPlan guarantees sorted, non-overlapping, not-in-the-past burns.
+  That precondition is now DOCUMENTED on `fly` and enforcement is
+  deliberately deferred (see the plan.rs entry).
+- The coast-gap bug is FIXED (74c0b08): `reference` is read after the
+  coast advances the clock.
+- `max_accel` and `mass` are stored but never read. **`max_accel`
+  enforcement is DEFERRED to the UI layer by decision (2026-09-25)**, with
+  CLAMP semantics: per the `fly` doc comment, pushing "more" than the max
+  results in the max, rather than an error. Consequence: `fly` itself
+  will happily fly a plan above the ship's limit, so any non-UI caller
+  (tests, a future GM tool, the CLI) bypasses the limit. These four
+  fields (`name`, `transponder_id`, `mass`, `max_accel`) are still the
+  ONLY thing keeping `#![allow(dead_code)]` alive in lib.rs (verified
+  2026-09-25: removing the allow fails clippy on exactly those four
+  fields). Getters would retire it.
+- `substep_calculator` is a stub returning 60.0 (doc comment: may become a
+  GM setting once performance is measured).
+- 2 tests, both μ = 0 with nonzero `v0 = (1,1,1)` (coverage the planner
+  tests lack), built with `test_fixtures::test_ship`:
+  - `test_flight`: four 6000 s, 100 m/s² burns, ABUTTING, cancelling
+    pairwise, so the ship must end at `r0 + v0·24000` with `v0`
+    unchanged. Exercises only the abutting path.
+  - `fly_with_coast` (2026-09-25): the same four burns with a 600 s gap
+    BETWEEN THE PAIRS (burn 2 ends at 12000, burn 3 starts at 12600), so
+    the coast happens at velocity `v0` and the oracle stays
+    `r0 + v0·24600`. The first draft put the gap at PEAK velocity
+    (between burns 1 and 2) while keeping the old 24000 s oracle. It
+    failed by 359,999,534.89 m, which matched to 10 significant figures
+    the analytic prediction `(a·t_leg)·600·û + v0·600`. So the CODE was
+    right and the ORACLE was stale. That is the copied-test gotcha again.
+    Teeth: against the pre-fix `fly` it misses by 703,800,000 m.
+    Nice-to-haves not done: an assert on `test_ship.now() == J2000 +
+    24600 s` (which would have named the wrong duration directly), and
+    both ship.rs tests' messages still say "initial and final position"
+    when they compare final vs expected.
 
 `planner.rs` — NEW 2026-09, THE SOLVER. Moved out of plan.rs at stage 3 as
 planned (it depends on orbits/vectors; plan.rs does not).
@@ -877,31 +913,57 @@ planned (it depends on orbits/vectors; plan.rs does not).
 - Tests (3): `invalid_accel` (zero/inf/neg/NaN, `let … else` payload
   binding, matching the burns.rs pattern; its final
   `assert!(a_nan.is_nan())` asserts the fixture, not the code, and can be
-  deleted). `stationary_target` (μ = 0, rest-to-rest to near-origin,
-  recorded miss 1.0911e-3 m, **tolerance 1.1e-3: 1.008× headroom**. That
-  is the same knife-edge mistake the gotchas section records twice.
-  Re-set to a few ×). `moving_target` (μ = 0 origin at rest → Pallas on
+  deleted, still present 2026-09-25). `stationary_target` (μ = 0,
+  rest-to-rest to near-origin, recorded miss 1.0911e-3 m. The tolerance
+  was 1.1e-3 (1.008× headroom, the knife-edge mistake again), then 2e-3,
+  and is now **5e-3, ~4.6×**. FIXED). `moving_target` (μ = 0 origin at rest → Pallas on
   Sol rails, recorded miss 703 m, tolerance 2e3). The 2e3 is TIGHTER than
   the ~17 km the solver's 1 s tolerance guarantees, so 703 m is a
   convergence-luck value for this fixture; a different target or accel
   can legally miss by 10 km and fail. Either derive the tolerance from
   the solver's bound or tighten the solver's convergence criterion (in
-  DISTANCE, which is what the budget is in).
-- Fixture duplication: the EMB and Pallas J2000 element sets are now
-  transcribed in FOUR files (orbits.rs, vectors.rs, integrate.rs,
-  planner.rs). Per the DRY rule, transcribed setup gets ONE home. Across
-  modules that means a crate-level `#[cfg(test)]` fixtures module.
-  planner.rs's `test_orbit_one` also uses `Sol.mu()` for EMB (the wrong
-  two-body μ per bodies.rs). Harmless here because nothing compares it to
-  Horizons, but it is the silent-disagreement risk the rule exists for.
-  The two planner tests and `test_flight` also each spell out the same
-  seven-argument `Ship::new` setup, which is a helper candidate.
+  DISTANCE, which is what the budget is in). STILL OPEN. Its assert
+  message also still says "initial and final position".
+
+`test_fixtures.rs` — NEW 2026-09-25 (uncommitted at time of writing). The
+ONE home for transcribed test setup, replacing copies in orbits.rs,
+vectors.rs, integrate.rs, planner.rs, plan.rs and ship.rs. Before the
+merge, all four EMB/Pallas copies were verified digit-for-digit identical,
+so no test's numbers moved (46/46 green, same tolerances).
+- Declared `#[cfg(test)] pub mod test_fixtures;` in lib.rs, with a `//!`
+  doc. Functions are `pub`, which is effectively crate-only because the
+  module exists only under `cfg(test)`.
+- Contents: `emb_elements()`, `pallas_elements()`,
+  `create_test_elements(a, e, i, Ω, ω, M)` (epoch fixed at J2000, used by
+  the edge-case tests), `emb_orbit()`, `pallas_orbit()`,
+  `stationary_emb()` (EMB's J2000 Horizons position, v = 0),
+  `stationary_emb_orbit()` and `stationary_near_origin[_orbit]()` (both
+  on `CentralBody::None`), and `test_ship(state, center)` (fills name,
+  clock = J2000, transponder, mass 1, max_accel 1000).
+- What stays OUT, per the test DRY rule: Horizons expected vectors,
+  recorded misses, tolerances. Those remain literal in each test.
+- **μ is NOT paired with the elements (DEFERRED 2026-09-25, "cross that
+  bridge when it needs to get done").** Horizons tests still compose
+  their own μ at the call site (`MU_SOL + MU_EARTH + MU_LUNA` for EMB,
+  `MU_SOL` for Pallas). The agreed shape when it is done: the fixture
+  returns elements AND μ together (tuple or small struct), NOT μ as a
+  parameter. μ is fixture DATA (Horizons printed it as that query's
+  "Keplerian GM"), and a parameter would hand the pairing choice back
+  to every caller.
+- **`emb_orbit()` is EMB's elements on Sun-only μ**, so it is NOT
+  Horizons-accurate (~1,429 km/yr off, per the bodies.rs measurement). It
+  cannot be fixed inside the fixture, see the `Orbit` μ limitation under
+  roadmap F. Fine for its only use (a plausible planner target in
+  `invalid_accel`); never use it in a known-answer test. It deserves a
+  doc comment saying so. `pallas_orbit()` has no such issue: Pallas's
+  correct μ IS `MU_SOL`.
 
 3D migration (branch adventure-to-the-third-dimension): COMPLETE.
 Checklist items 1–7 plus `Trajectory::from_state` in full 3D all done.
 
-fmt/clippy/tests all green as of 2026-09-25 (45 sim-core tests), full
-CI gate run (fmt + clippy --all-targets -D warnings + test --workspace).
+fmt/clippy/tests all green as of 2026-09-25 (46 sim-core tests, working
+tree incl. the uncommitted fixtures refactor), full CI gate run (fmt +
+clippy --all-targets -D warnings + test --workspace).
 
 Next up, in order (REORDERED 2026-08-08 — the burn integrator was moved
 ahead of the CLI). Rationale: the CLI's command surface is defined by what
@@ -949,7 +1011,7 @@ Acceleration is gravity + thrust, NEVER thrust alone. The closure still
 lives only in tests; no production caller exists because no `Ship` does.
 
 BUILT 2026-09 as `Ship::fly` (see ship.rs in Current state). The first
-decision below is implemented, but with the coast-gap bug. The second was
+decision below is implemented (its coast-gap bug fixed in 74c0b08). The second was
 SUPERSEDED by one-burn-per-`integrate`-call for substep alignment.
 Original reasoning kept for the record. It needs an
 owner that holds three things at once: the ship's StateVector, WHAT TIME
@@ -1030,17 +1092,23 @@ only in flat space from rest, so "plan a real trip" is not yet a sim-core
 capability, and a CLI built now would mostly display wrong answers.
 
 A. Harden what exists (small, do first, each one a failing test first):
-   A1. Fix the `Ship::fly` coast-gap bug and add a gap test.
+   A1. DONE 2026-09-25 (74c0b08): `Ship::fly` coast-gap bug fixed,
+       guarded by `fly_with_coast`.
    A2. Fix the zero-velocity NaN in `Trajectory::from_state` and add a
-       `test_at_rest` (μ = Sol, v = 0 → PureRadial).
-   A3. Invariants and hygiene: validating `FlightPlan::new` (sorted,
-       non-overlapping; Result). `fly` or the planner checks
-       `max_accel`. Ship getters, then delete `#![allow(dead_code)]`.
-       Rename `CentralBody::None`. Planner rejects mismatched centers.
-   A4. Test hygiene: `stationary_target` 1.008× tolerance,
-       `moving_target` tolerance vs the solver bound,
-       `one_d_brachistochrone` 1e-7 → 1e-4 + messages, a shared
-       element-fixture module, and a `Ship` test helper.
+       `test_at_rest` (μ = Sol, v = 0 → PureRadial). OPEN.
+   A3. Invariants and hygiene. DEFERRED by decision: plan ordering
+       (to the UI/planner) and `max_accel` (to the UI, clamp semantics).
+       See ship.rs. STILL OPEN: Ship getters → delete
+       `#![allow(dead_code)]`, rename `CentralBody::None`, planner
+       rejects mismatched centers.
+   A4. Test hygiene. DONE: shared `test_fixtures.rs` module, `test_ship`
+       helper, `stationary_target` tolerance 5e-3. STILL OPEN:
+       `moving_target` tolerance vs the solver's ~17 km bound,
+       `one_d_brachistochrone` 1e-7 → 1e-4 + its messages, the stale
+       "initial and final" assert messages in ship.rs/planner.rs, the
+       dead `assert!(a_nan.is_nan())` in `invalid_accel`, and a doc
+       comment on `emb_orbit()` flagging Sun-only μ. Commit the fixtures
+       refactor.
 B. Make the planner physically real (the actual item-4 finish):
    B1. Boundary velocities: a moving origin (v0) AND matching the
        target's velocity at arrival (rendezvous, not intercept). Solve in
@@ -1067,6 +1135,16 @@ E. sim-protocol message enums → sim-server (axum + WS) → frontend spike.
 F. Deferred physics: SOI detection + patched-conic re-framing (needed for
    Jovian/Saturnian moon stations), RK4 + the pinned perturbed coast
    (old item 6).
+   - **`Orbit` cannot represent a MASSIVE body faithfully** (noted
+     2026-09-25, deliberately deferred). `Orbit` takes its μ from
+     `center.mu()`, which is the central body's μ ALONE, correct for ships
+     (negligible mass) but not the two-body μ a planet needs. So an EMB
+     `Orbit` propagates on `MU_SOL` and drifts ~1,429 km/yr from the
+     correct `MU_SOL + MU_EARTH + MU_LUNA` rails. That is over budget on
+     its own. It is the bodies.rs "`mu()` is NOT the two-body μ" asymmetry
+     surfacing one layer up. TRIGGER: when `data/` seeds planets as planner
+     targets (roadmap D). Then `Orbit` needs a way to carry a two-body μ
+     for massive bodies. Do NOT design it before a real caller exists.
 
 ## Known gotchas (avoid repeats)
 

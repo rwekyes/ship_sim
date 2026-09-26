@@ -123,7 +123,7 @@ fn perifocal_to_ecliptic(elements: &OrbitalElements) -> DMat3 {
 mod tests {
     use super::*;
     use crate::bodies::{MU_EARTH, MU_LUNA, MU_SOL};
-    use crate::time::J2000;
+    use crate::test_fixtures::{create_test_elements, emb_elements, pallas_elements};
 
     #[test]
     fn test_solve_kepler_zero_ma() {
@@ -206,15 +206,7 @@ mod tests {
     //   (two-body assumption cost; tolerance 1e7 m set with headroom).
     #[test]
     fn test_earth_coasting_to_jpl_data() {
-        let elements = OrbitalElements {
-            semi_major_axis: 1.495973362233347e8 * 1000f64, // km conversion
-            eccentricity: 1.670236222428361e-2,
-            inclination: 1.034624342994112e-4f64.to_radians(),
-            ascending_node: 1.402921798841513e2f64.to_radians(),
-            arg_periapsis: 3.226257524989104e2f64.to_radians(),
-            mean_anomaly_epoch: 3.575452038219296e2f64.to_radians(),
-            epoch: *J2000,
-        };
+        let elements = emb_elements();
         let expected = [
             DVec3::new(
                 -2.65025768897131e7f64,
@@ -265,15 +257,7 @@ mod tests {
     //   (two-body assumption cost; tolerance 6e7 m set with headroom).
     #[test]
     fn test_pallas_coasting_to_jpl_data() {
-        let elements = OrbitalElements {
-            semi_major_axis: 4.147335391670697e8 * 1000f64, // km conversion
-            eccentricity: 2.296435321697976e-1,
-            inclination: 3.484614003622473e1f64.to_radians(),
-            ascending_node: 1.731977991340821e2f64.to_radians(),
-            arg_periapsis: 3.102656379003444e2f64.to_radians(),
-            mean_anomaly_epoch: 3.529602856167207e2f64.to_radians(),
-            epoch: *J2000,
-        };
+        let elements = pallas_elements();
         let expected = [
             DVec3::new(
                 -1.258325200874033e8,
@@ -307,25 +291,6 @@ mod tests {
                 position,
                 exp
             );
-        }
-    }
-
-    fn create_test_elements(
-        semi_major_axis: f64,
-        eccentricity: f64,
-        inclination: f64,
-        ascending_node: f64,
-        arg_periapsis: f64,
-        mean_anomaly_epoch: f64,
-    ) -> OrbitalElements {
-        OrbitalElements {
-            semi_major_axis,
-            eccentricity,
-            inclination,
-            ascending_node,
-            arg_periapsis,
-            mean_anomaly_epoch,
-            epoch: *J2000,
         }
     }
 }

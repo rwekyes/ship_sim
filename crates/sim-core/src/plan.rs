@@ -27,8 +27,8 @@ impl FlightPlan {
 mod tests {
     use super::*;
     use crate::integrate::integrate;
+    use crate::test_fixtures::stationary_emb;
     use crate::time::J2000;
-    use crate::vectors::StateVector;
     use glam::DVec3;
     use hifitime::TimeUnits;
 
@@ -49,14 +49,7 @@ mod tests {
 
         let plan = FlightPlan { maneuvers };
 
-        let state = StateVector {
-            position: DVec3::new(
-                -2.65025768897131e7,
-                1.44693955627991e8,
-                -1.704331902042031e2,
-            ) * 1e3,
-            velocity: DVec3::ZERO,
-        };
+        let state = stationary_emb();
 
         let final_state = integrate(state, 0.0, 20000.0, 10.0, |t, _s| {
             plan.maneuvers()

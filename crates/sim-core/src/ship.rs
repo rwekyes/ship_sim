@@ -103,6 +103,7 @@ mod tests {
     use super::*;
     use crate::burns::Burn;
     use crate::plan::{FlightPlan, Maneuver};
+    use crate::test_fixtures::test_ship;
     use crate::time::J2000;
     use glam::DVec3;
     #[test]
@@ -136,7 +137,6 @@ mod tests {
             Maneuver::Burn(test_burn4),
         ];
         let test_plan = FlightPlan::new(maneuvers);
-        let name = String::from("Test Ship");
         let initial_position = DVec3::new(1.0, 1.0, 1.0);
         let initial_velocity = DVec3::new(1.0, 1.0, 1.0);
         let current_state = StateVector {
@@ -144,19 +144,7 @@ mod tests {
             velocity: initial_velocity,
         };
         let center = CentralBody::None;
-        let clock = Clock::new(*J2000);
-        let transponder_id = String::from("123456789");
-        let mass = 1.0;
-        let max_accel = 1000.0;
-        let mut test_ship = Ship::new(
-            name,
-            current_state,
-            center,
-            clock,
-            transponder_id,
-            mass,
-            max_accel,
-        );
+        let mut test_ship = test_ship(current_state, center);
         let final_state = test_ship.fly(&test_plan);
         let expected_position = initial_position + initial_velocity * 24000.0;
         let expected_velocity = initial_velocity;
@@ -205,7 +193,6 @@ mod tests {
             Maneuver::Burn(test_burn4),
         ];
         let test_plan = FlightPlan::new(maneuvers);
-        let name = String::from("Test Ship");
         let initial_position = DVec3::new(1.0, 1.0, 1.0);
         let initial_velocity = DVec3::new(1.0, 1.0, 1.0);
         let current_state = StateVector {
@@ -213,19 +200,7 @@ mod tests {
             velocity: initial_velocity,
         };
         let center = CentralBody::None;
-        let clock = Clock::new(*J2000);
-        let transponder_id = String::from("123456789");
-        let mass = 1.0;
-        let max_accel = 1000.0;
-        let mut test_ship = Ship::new(
-            name,
-            current_state,
-            center,
-            clock,
-            transponder_id,
-            mass,
-            max_accel,
-        );
+        let mut test_ship = test_ship(current_state, center);
         let final_state = test_ship.fly(&test_plan);
         let expected_position = initial_position + initial_velocity * 24600.0;
         let expected_velocity = initial_velocity;

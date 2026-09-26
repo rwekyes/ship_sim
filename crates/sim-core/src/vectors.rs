@@ -149,6 +149,7 @@ mod tests {
     use super::*;
     use crate::bodies::{MU_EARTH, MU_LUNA, MU_SOL};
     use crate::orbits::{propagate_mean_anomaly, solve_kepler};
+    use crate::test_fixtures::{create_test_elements, emb_elements, pallas_elements};
     use crate::time::J2000;
 
     // Known-answer test against JPL Horizons (DE441), retrieved 2026-07-14.
@@ -163,14 +164,7 @@ mod tests {
     #[test]
     fn test_earth_round_trip() {
         let mu = MU_SOL + MU_EARTH + MU_LUNA;
-        let elements = create_test_elements(
-            1.495973362233347e8 * 1000f64,
-            1.670236222428361e-2,
-            1.034624342994112e-4f64.to_radians(),
-            1.402921798841513e2f64.to_radians(),
-            3.226257524989104e2f64.to_radians(),
-            3.575452038219296e2f64.to_radians(),
-        );
+        let elements = emb_elements();
         let expected = [
             StateVector {
                 position: DVec3::new(
@@ -235,14 +229,7 @@ mod tests {
     #[test]
     fn test_pallas_round_trip() {
         let mu = MU_SOL;
-        let elements = create_test_elements(
-            4.147335391670697e8 * 1000f64,
-            2.296435321697976e-1,
-            3.484614003622473e1f64.to_radians(),
-            1.731977991340821e2f64.to_radians(),
-            3.102656379003444e2f64.to_radians(),
-            3.529602856167207e2f64.to_radians(),
-        );
+        let elements = pallas_elements();
         let expected = [
             StateVector {
                 position: DVec3::new(
@@ -453,24 +440,6 @@ mod tests {
                 state.velocity.z,
                 exp.velocity.z
             );
-        }
-    }
-    fn create_test_elements(
-        semi_major_axis: f64,
-        eccentricity: f64,
-        inclination: f64,
-        ascending_node: f64,
-        arg_periapsis: f64,
-        mean_anomaly_epoch: f64,
-    ) -> OrbitalElements {
-        OrbitalElements {
-            semi_major_axis,
-            eccentricity,
-            inclination,
-            ascending_node,
-            arg_periapsis,
-            mean_anomaly_epoch,
-            epoch: *J2000,
         }
     }
 }

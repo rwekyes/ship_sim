@@ -82,9 +82,10 @@ fn solve_flight_time(
 mod tests {
     use super::*;
     use crate::bodies::CentralBody;
-    use crate::orbits::{OrbitalElements, solve_kepler};
-    use crate::time::{Clock, J2000};
-    use crate::vectors::{StateVector, elements_to_state_vector};
+    use crate::test_fixtures::{
+        emb_orbit, pallas_orbit, stationary_emb, stationary_emb_orbit, stationary_near_origin,
+        stationary_near_origin_orbit, test_ship,
+    };
 
     #[test]
     fn invalid_accel() {
@@ -92,7 +93,7 @@ mod tests {
         let a_inf = f64::INFINITY;
         let a_neg = -1.0;
         let a_nan = f64::NAN;
-        let planner = Planner::new(test_orbit_one(), test_orbit_two());
+        let planner = Planner::new(emb_orbit(), pallas_orbit());
         let Err(PlanError::InvalidAccel { accel }) = planner.fixed_accel(a_zero) else {
             panic!("Invalid accel {a_zero}")
         };
@@ -116,26 +117,10 @@ mod tests {
     #[test]
     fn stationary_target() {
         let center = CentralBody::None;
-        let planner = Planner::new(
-            Orbit::from_state(stationary_earth(), center, *J2000),
-            Orbit::from_state(stationary_near_origin(), center, *J2000),
-        );
+        let planner = Planner::new(stationary_emb_orbit(), stationary_near_origin_orbit());
         let test_plan = planner.fixed_accel(33.333).unwrap();
-        let name = String::from("Test Ship");
-        let current_state = stationary_earth();
-        let clock = Clock::new(*J2000);
-        let transponder_id = String::from("123456789");
-        let mass = 1.0;
-        let max_accel = 1000.0;
-        let mut test_ship = crate::ship::Ship::new(
-            name,
-            current_state,
-            center,
-            clock,
-            transponder_id,
-            mass,
-            max_accel,
-        );
+        let current_state = stationary_emb();
+        let mut test_ship = test_ship(current_state, center);
         let final_state = test_ship.fly(&test_plan);
         let position_distance = final_state
             .position
@@ -143,7 +128,7 @@ mod tests {
         let velocity_distance = final_state.velocity.distance(DVec3::ZERO);
         assert!(
             position_distance <= 5e-3,
-            "Distance between initial and final position is {}, greater than tolerance of 5e-3",
+            "Distance between initial and expected position is {}, greater than tolerance of 5e-3",
             position_distance
         );
         assert!(
@@ -157,30 +142,14 @@ mod tests {
     #[test]
     fn moving_target() {
         let center = CentralBody::None;
-        let planner = Planner::new(
-            Orbit::from_state(stationary_earth(), center, *J2000),
-            test_orbit_two(),
-        );
+        let planner = Planner::new(stationary_emb_orbit(), pallas_orbit());
         let test_plan = planner.fixed_accel(33.333).unwrap();
-        let name = String::from("Test Ship");
-        let current_state = stationary_earth();
-        let clock = Clock::new(*J2000);
-        let transponder_id = String::from("123456789");
-        let mass = 1.0;
-        let max_accel = 1000.0;
-        let mut test_ship = crate::ship::Ship::new(
-            name,
-            current_state,
-            center,
-            clock,
-            transponder_id,
-            mass,
-            max_accel,
-        );
+        let current_state = stationary_emb();
+        let mut test_ship = test_ship(current_state, center);
         let final_state = test_ship.fly(&test_plan);
         let position_distance = final_state
             .position
-            .distance(test_orbit_two().state_at(test_ship.now()).unwrap().position);
+            .distance(pallas_orbit().state_at(test_ship.now()).unwrap().position);
         let velocity_distance = final_state.velocity.distance(DVec3::ZERO);
         assert!(
             position_distance <= 2e3,
@@ -192,77 +161,5 @@ mod tests {
             "Distance between initial and final velocity is {}, greater than tolerance of 1e-8",
             velocity_distance
         );
-    }
-
-    // Earth's orbit
-    fn test_orbit_one() -> Orbit {
-        let elements = create_test_elements(
-            1.495973362233347e8 * 1000f64,
-            1.670236222428361e-2,
-            1.034624342994112e-4f64.to_radians(),
-            1.402921798841513e2f64.to_radians(),
-            3.226257524989104e2f64.to_radians(),
-            3.575452038219296e2f64.to_radians(),
-        );
-        let state = elements_to_state_vector(
-            &elements,
-            CentralBody::Sol.mu(),
-            solve_kepler(elements.mean_anomaly_epoch, elements.eccentricity).unwrap(),
-        );
-        Orbit::from_state(state, CentralBody::Sol, *J2000)
-    }
-    // Pallas' orbit
-    fn test_orbit_two() -> Orbit {
-        let elements = create_test_elements(
-            4.147335391670697e8 * 1000f64,
-            2.296435321697976e-1,
-            3.484614003622473e1f64.to_radians(),
-            1.731977991340821e2f64.to_radians(),
-            3.102656379003444e2f64.to_radians(),
-            3.529602856167207e2f64.to_radians(),
-        );
-        let state = elements_to_state_vector(
-            &elements,
-            CentralBody::Sol.mu(),
-            solve_kepler(elements.mean_anomaly_epoch, elements.eccentricity).unwrap(),
-        );
-        Orbit::from_state(state, CentralBody::Sol, *J2000)
-    }
-
-    fn create_test_elements(
-        semi_major_axis: f64,
-        eccentricity: f64,
-        inclination: f64,
-        ascending_node: f64,
-        arg_periapsis: f64,
-        mean_anomaly_epoch: f64,
-    ) -> OrbitalElements {
-        OrbitalElements {
-            semi_major_axis,
-            eccentricity,
-            inclination,
-            ascending_node,
-            arg_periapsis,
-            mean_anomaly_epoch,
-            epoch: *J2000,
-        }
-    }
-
-    fn stationary_earth() -> StateVector {
-        StateVector {
-            position: DVec3::new(
-                -2.65025768897131e7,
-                1.44693955627991e8,
-                -1.704331902042031e2,
-            ) * 1.0e3,
-            velocity: DVec3::ZERO,
-        }
-    }
-
-    fn stationary_near_origin() -> StateVector {
-        StateVector {
-            position: DVec3::new(1.0, 1.0, 1.0),
-            velocity: DVec3::ZERO,
-        }
     }
 }

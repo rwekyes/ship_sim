@@ -57,7 +57,8 @@ mod tests {
     use crate::bodies::{MU_EARTH, MU_LUNA, MU_SOL};
     use crate::burns::Burn;
     use crate::integrate::two_body;
-    use crate::orbits::{OrbitalElements, solve_kepler};
+    use crate::orbits::solve_kepler;
+    use crate::test_fixtures::emb_elements;
     use crate::time::J2000;
     use crate::vectors::elements_to_state_vector;
     use hifitime::TimeUnits;
@@ -136,7 +137,7 @@ mod tests {
     #[test]
     fn energy_bound() {
         let mu = MU_SOL + MU_EARTH + MU_LUNA;
-        let elements = emb_j2000_elements();
+        let elements = emb_elements();
         let ecc_anomaly = solve_kepler(elements.mean_anomaly_epoch, elements.eccentricity).unwrap();
         let mut state = elements_to_state_vector(&elements, mu, ecc_anomaly);
         let epsilon_0 = specific_energy(mu, &state);
@@ -318,22 +319,10 @@ mod tests {
             velocity_difference
         );
     }
-    // Helper returns J2000 elements for EMB
-    fn emb_j2000_elements() -> OrbitalElements {
-        OrbitalElements {
-            semi_major_axis: 1.495973362233347e8 * 1000f64, // km conversion
-            eccentricity: 1.670236222428361e-2,
-            inclination: 1.034624342994112e-4f64.to_radians(),
-            ascending_node: 1.402921798841513e2f64.to_radians(),
-            arg_periapsis: 3.226257524989104e2f64.to_radians(),
-            mean_anomaly_epoch: 3.575452038219296e2f64.to_radians(),
-            epoch: *J2000,
-        }
-    }
     // helper computes the miss in meters between the integrator and the keplerian solver
     fn kepler_miss(substep: f64) -> f64 {
         let mu = MU_SOL + MU_EARTH + MU_LUNA;
-        let elements = emb_j2000_elements();
+        let elements = emb_elements();
         let ecc_anomaly = solve_kepler(elements.mean_anomaly_epoch, elements.eccentricity).unwrap();
         let initial_state = elements_to_state_vector(&elements, mu, ecc_anomaly);
         let new_state = integrate(initial_state, 0.0, 175320.0 * 60.0, substep, |_t, s| {
