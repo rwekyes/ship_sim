@@ -28,7 +28,7 @@ pub fn emb_orbit() -> Orbit {
     let elements = emb_elements();
     let state = elements_to_state_vector(
         &elements,
-        CentralBody::Sol.mu(),
+        CentralBody::Sol.mu() + CentralBody::Earth.mu() + CentralBody::Luna.mu(),
         solve_kepler(elements.mean_anomaly_epoch, elements.eccentricity).unwrap(),
     );
     Orbit::from_state(state, CentralBody::Sol, *J2000)
