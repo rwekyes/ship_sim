@@ -91,7 +91,7 @@ impl Ship {
         self.clock.now()
     }
 
-    pub fn name(&self) -> &String {
+    pub fn name(&self) -> &str {
         &self.name
     }
 
@@ -103,11 +103,11 @@ impl Ship {
         &self.current_state
     }
 
-    pub fn center(&self) -> &CentralBody {
-        &self.center
+    pub fn center(&self) -> CentralBody {
+        self.center
     }
 
-    pub fn transponder_id(&self) -> &String {
+    pub fn transponder_id(&self) -> &str {
         &self.transponder_id
     }
 
@@ -181,12 +181,12 @@ mod tests {
         let velocity_distance = final_state.velocity.distance(expected_velocity);
         assert!(
             position_distance <= 1e-6,
-            "Distance between initial and expected position is {}, greater than tolerance of 1e-6",
+            "Distance between derived and expected position is {}, greater than tolerance of 1e-6",
             position_distance
         );
         assert!(
             velocity_distance <= 1e-8,
-            "Distance between initial and expected velocity is {}, greater than tolerance of 1e-8",
+            "Distance between derived and expected velocity is {}, greater than tolerance of 1e-8",
             velocity_distance
         );
     }
@@ -238,12 +238,12 @@ mod tests {
         let velocity_distance = final_state.velocity.distance(expected_velocity);
         assert!(
             position_distance <= 1e-6,
-            "Distance between initial and expected position is {}, greater than tolerance of 1e-6",
+            "Distance between derived and expected position is {}, greater than tolerance of 1e-6",
             position_distance
         );
         assert!(
             velocity_distance <= 1e-8,
-            "Distance between initial and expected velocity is {}, greater than tolerance of 1e-8",
+            "Distance between derived and expected velocity is {}, greater than tolerance of 1e-8",
             velocity_distance
         );
     }

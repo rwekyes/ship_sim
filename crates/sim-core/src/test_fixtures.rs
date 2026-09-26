@@ -23,12 +23,12 @@ pub fn test_ship(current_state: StateVector, center: CentralBody) -> Ship {
         max_accel,
     )
 }
-
+// Not Horizons data - only for unit tests
 pub fn emb_orbit() -> Orbit {
     let elements = emb_elements();
     let state = elements_to_state_vector(
         &elements,
-        CentralBody::Sol.mu() + CentralBody::Earth.mu() + CentralBody::Luna.mu(),
+        CentralBody::Sol.mu(),
         solve_kepler(elements.mean_anomaly_epoch, elements.eccentricity).unwrap(),
     );
     Orbit::from_state(state, CentralBody::Sol, *J2000)
