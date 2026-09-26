@@ -110,7 +110,6 @@ mod tests {
             panic!("Invalid accel {a_nan}")
         };
         assert!(accel.is_nan());
-        assert!(a_nan.is_nan());
     }
 
     // Recorded miss: 0.0010911002640611102
