@@ -1,0 +1,10 @@
+Fixed acceleration, solve for duration, match position but not velocity.
+Fixed acceleration, solve for duration, match position and velocity.
+Fixed duration, solve for constant acceleration, match position but not velocity.
+Fixed duration, solve for constant acceleration, match position and velocity.
+Uneven burns, solve for lowest or fixed duration for given max acceleration.
+All of the above with a coast in the dead center, adjustable length.
+
+After ship properties:
+Reaction mass consumption factored in, navigation modes get limited by stored mass
+Mass consumption max can be set by player in plotter
