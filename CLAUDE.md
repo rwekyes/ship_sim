@@ -213,16 +213,25 @@ cargo member unless WASM.
 `cargo test --workspace`. Warnings are errors in CI. rust-toolchain.toml
 pins stable + components.
 
-## Current state (as of 2026-09-25)
+## Current state (as of 2026-10-30)
 
-Head is 74c0b08 on branch `planners-and-solvers` (fly() coast fix +
-`fly_with_coast`). The working tree carries an UNCOMMITTED refactor: the
-new `test_fixtures.rs` module plus the call-site changes in six test
-modules. `burn_integrator` is merged into master; the current branch is
-branched off that merge and is NOT yet merged. 46 sim-core tests,
-fmt/clippy/tests all green on the working tree (full CI gate run, not just
-`cargo test`). sim-cli, sim-server, sim-protocol and sim-store are still
-hello-world stubs.
+Head is c74161e on branch `planners-and-solvers` (design doc for planner
+modes; the last code commit is 3a6a475, "finish roadmap A", 2026-09-25).
+Working tree clean, pushed, in sync with `origin/planners-and-solvers`.
+`burn_integrator` is merged into master; the current branch is branched
+off that merge, is 35 commits ahead of master and is NOT yet merged.
+47 sim-core tests, fmt/clippy/tests all green (full CI gate run
+2026-10-30, not just `cargo test`). sim-cli, sim-server, sim-protocol and
+sim-store are still hello-world stubs. Roadmap A is COMPLETE; next is B1.
+
+`design/Planner-Modes.txt` (c74161e, 2026-09-27) — first-pass list of
+planner modes, the owner's own design notes: fixed accel → solve duration,
+fixed duration → solve accel, each in "match position" (intercept) and
+"match position AND velocity" (rendezvous) flavours; uneven burns (min or
+fixed duration under a max accel); all of the above with an adjustable
+dead-centre coast; later, reaction-mass limits and a player-set mass
+budget in the plotter. The two "match velocity" modes ARE roadmap B1.
+`fixed_accel` is the first mode (intercept, from rest, flat space).
 
 Roadmap items 2 AND 3 are COMPLETE, and as of 2026-08-21 so is the wiring
 between them: `accel_at` is fed to `integrate` through a composed closure
@@ -249,18 +258,16 @@ the coast. Guarded by `fly_with_coast` (see ship.rs), which was verified to
 FAIL against the old code with a 703,800,000 m miss while `test_flight`
 stays green on it. So `fly_with_coast` is the only test guarding this bug.
 
-OPEN BUG found 2026-09-25 (reproduced in a scratch copy, not covered by a
-test, roadmap A2):
-- **`Trajectory::from_state` turns a zero-velocity state into a NaN orbit
-  under nonzero μ.** The radial test `h_len / (r_len * v_len) <= 1e-8` is
-  0/0 = NaN when v = 0; NaN compares false, so it falls through, ε = −μ/r
-  < 0, and it classifies as `Elliptic` with e = 1.0, inclination NaN, ω
-  NaN. Any later `state_at`/`current_state` then fails `solve_kepler` with
-  NotElliptical. Under μ = 0 (`CentralBody::None`) the same state lands in
-  `Escape` by luck (ε = 0 ≥ 0), which is why the planner tests never saw
-  it. A ship at rest is the limit of PureRadial (h = 0) and belongs there.
-  Written as `h_len <= 1e-8 * r_len * v_len` the comparison is 0 <= 0,
-  true, no division, no NaN.
+FIXED 2026-09-25 (543d991, roadmap A2): **`Trajectory::from_state` turned
+a zero-velocity state into a NaN orbit under nonzero μ.** The radial test
+was `h_len / (r_len * v_len) <= 1e-8`, which is 0/0 = NaN when v = 0; NaN
+compares false, so it fell through, ε = −μ/r < 0, and it classified as
+`Elliptic` with e = 1.0, inclination NaN, ω NaN, and any later
+`state_at`/`current_state` failed `solve_kepler` with NotElliptical. Under
+μ = 0 the same state lands in `Escape` by luck (ε = 0 ≥ 0), which is why
+the planner tests never saw it. A ship at rest is the limit of PureRadial
+(h = 0) and belongs there. Now written `h_len <= 1e-8 * r_len * v_len`
+(0 <= 0, true, no division). Guarded by `test_at_rest` in vectors.rs.
 
 
 Done: workspace scaffold, README, MIT license, .gitignore (/target, .idea/,
@@ -382,8 +389,8 @@ there); vectors.rs owns the Cartesian world and the conversions crossing
 the boundary.
 
 `Trajectory::from_state(state, mu, epoch) -> Trajectory` (takes StateVector
-by value, not &): h = r.cross(v); classify by |h|/(|r||v|) ≤ 1e-8 →
-PureRadial, then ε ≥ 0 → Escape, else Elliptic (radial check FIRST, before
+by value, not &): h = r.cross(v); classify by |h| ≤ 1e-8·|r||v| →
+PureRadial (multiplied, not divided, so v = 0 lands here too), then ε ≥ 0 → Escape, else Elliptic (radial check FIRST, before
 escape — a collinear state resolves to PureRadial regardless of energy).
 Element recovery: node n = ẑ×h; ecc_vec = v×h/μ − r̂; i = acos(h_z/|h|)
 clamped [−1,1]; a = −μ/2ε. Singularity handling via two guards — equatorial
@@ -395,10 +402,12 @@ helper does the signed-angle-about-an-axis work (cross·axis atan2 dot,
 rem_euclid TAU), reused for Ω, ω, and the circular M. Non-circular M
 recovered via E from cos_e/sin_e → atan2 → M = E − e·sin E.
 
-Tests (7, all pass): two Horizons elements→state→elements round-trips
+Tests (8, all pass): two Horizons elements→state→elements round-trips
 (test_earth_round_trip, test_pallas_round_trip — 4 sample points each,
-prime-ish step, reusing the shared test_round_trip helper) plus five
-edge cases: test_circular, test_circular_equatorial, test_equatorial
+prime-ish step, reusing the shared test_round_trip helper), test_at_rest
+(2026-09-25: μ = Sol, v = 0 → matches! PureRadial, AND the resulting
+`Orbit`'s `current_state()` is Ok, i.e. the whole path is NaN-free) plus
+five edge cases: test_circular, test_circular_equatorial, test_equatorial
 (round-trip position/velocity within 1e3 m / 1e1 m/s), test_escape
 (50 km/s tangential at 1 AU, matches! Escape), test_pure_radial (v = 2e-7·r,
 a 3D non-axis-aligned collinear pair, matches! PureRadial). Round-trip
@@ -787,14 +796,16 @@ Vec<Maneuver> }`, and `FlightPlan::maneuvers()` returning
   - Receipt (measured 2026-09-03): BOTH residuals are EXACTLY 0.0 —
     bit-exact, not "within tolerance". Velocity residual 0, position
     residual vs 7e8 is 0, and dx = dy = 0 exactly (no cross-axis leak).
-  - **That exactness is FIXTURE LUCK, and the committed 1e-7 position
-    tolerance depends on it.** See the sub-ULP gotcha below. Widening it
-    to 1e-4 (matching `mu_zero_whole_span`) is an OUTSTANDING chore.
-  - Assertion-message drift, same class as `pure_kinematics`: both messages
-    hardcode "greater than 1e-7". They will misreport the moment either
-    tolerance is widened. Fix in the same edit. STILL OUTSTANDING
-    2026-09-25. (The `pure_kinematics` message and the `mean_motion` doc
-    drift noted elsewhere ARE fixed.)
+  - **That exactness is FIXTURE LUCK.** See the sub-ULP gotcha below. The
+    tolerances were 1e-7 (below one ULP at 7e8, i.e. pinned to the
+    fixture); BOTH are now `<= 1e-4` (44e5fec, 2026-09-25), matching
+    `mu_zero_whole_span`, and the messages were updated with them.
+  - Small leftovers in those messages (noticed 2026-10-30, harmless):
+    they read "greater that tolerance" (typo), and the POSITION message
+    prints `position_diff` (the displacement, ~7e8) rather than the
+    residual `(position_diff - 7e8).abs()` it actually compared. On a
+    failure it would report "700000000 is greater than 1e-4", which names
+    the wrong number. Verified by forcing a failure in a scratch copy.
 
 `Orbit` methods (vectors.rs, added 2026-09):
 - `Orbit::from_state(state, center, epoch)` — wraps
@@ -813,12 +824,12 @@ Vec<Maneuver> }`, and `FlightPlan::maneuvers()` returning
   inside one crate but blurs the "vectors.rs owns the Cartesian world"
   split. Low priority; revisit if a `propagate.rs` ever makes sense.
 
-`CentralBody::None` (bodies.rs, 2026-09) — `mu() = 0.0`, flat space for
-tests. Every μ = 0 test now goes through it. Two hazards: the name shadows
-`Option::None` under any glob import of the variants, and under μ = 0
-`Trajectory::from_state` classifies EVERY state as Escape/PureRadial (ε =
-v²/2 ≥ 0), so `state_at` always integrates. Consider renaming (e.g.
-`FlatSpace`) — roadmap A3. Not renamed as of 2026-09-25.
+`CentralBody::FlatSpace` (bodies.rs, 2026-09; renamed from `None` in
+3a6a475 because `None` shadowed `Option::None` under a glob import) —
+`mu() = 0.0`, flat space for tests. Every μ = 0 test goes through it.
+Remaining hazard: under μ = 0 `Trajectory::from_state` classifies EVERY
+state as Escape/PureRadial (ε = v²/2 ≥ 0), so `state_at` always
+integrates.
 
 `TimeStep::Seconds(f64)` (time.rs, 2026-09) — arbitrary-length clock
 advance for `Ship::fly`. The f64 payload forced dropping `Eq` from the
@@ -828,8 +839,13 @@ has no `PartialEq`).
 `ship.rs` — NEW 2026-09, first production caller of the gravity + thrust
 closure. `Ship { name, current_state, center: CentralBody, clock: Clock,
 transponder_id, mass, max_accel }`, all private, `Ship::new` with no
-validation, getters `orbit()` and `now()` only. NO derives (no Debug,
-Clone or serde yet).
+validation. Getters (f4f0963, 2026-09-25): `orbit()`, `now()`, `name()`
+and `transponder_id()` (both `-> &str`), `current_state() ->
+&StateVector`, `center()`, `mass()`, `max_accel()`, plus one setter
+`update_name(String)`. (`current_state` returns a reference although
+`StateVector` is `Copy`; returning by value would match the repo's
+by-value-for-Copy convention. Cosmetic.) NO derives (no Debug, Clone or
+serde yet).
 - `fly(&mut self, &FlightPlan) -> StateVector` walks the maneuvers ONE AT
   A TIME: if the burn starts after `clock.now()`, it coasts the gap
   (gravity only) and advances the clock; then it integrates the burn alone
@@ -851,11 +867,9 @@ Clone or serde yet).
   CLAMP semantics: per the `fly` doc comment, pushing "more" than the max
   results in the max, rather than an error. Consequence: `fly` itself
   will happily fly a plan above the ship's limit, so any non-UI caller
-  (tests, a future GM tool, the CLI) bypasses the limit. These four
-  fields (`name`, `transponder_id`, `mass`, `max_accel`) are still the
-  ONLY thing keeping `#![allow(dead_code)]` alive in lib.rs (verified
-  2026-09-25: removing the allow fails clippy on exactly those four
-  fields). Getters would retire it.
+  (tests, a future GM tool, the CLI) bypasses the limit. The getters
+  above retired `#![allow(dead_code)]`: it is GONE from lib.rs as of
+  f4f0963 (those four fields were the last thing it was muting).
 - `substep_calculator` is a stub returning 60.0 (doc comment: may become a
   GM setting once performance is measured).
 - 2 tests, both μ = 0 with nonzero `v0 = (1,1,1)` (coverage the planner
@@ -872,17 +886,25 @@ Clone or serde yet).
     the analytic prediction `(a·t_leg)·600·û + v0·600`. So the CODE was
     right and the ORACLE was stale. That is the copied-test gotcha again.
     Teeth: against the pre-fix `fly` it misses by 703,800,000 m.
-    Nice-to-haves not done: an assert on `test_ship.now() == J2000 +
-    24600 s` (which would have named the wrong duration directly), and
-    both ship.rs tests' messages still say "initial and final position"
-    when they compare final vs expected.
+    Nice-to-have not done: an assert on `test_ship.now() == J2000 +
+    24600 s` (which would have named the wrong duration directly). The
+    stale "initial and final" messages now read "derived and expected".
+  - Recorded position miss for BOTH tests: 2.068525054481194e-7 m
+    (re-measured 2026-10-30, identical for the two, tolerance 1e-6,
+    ~4.8×). The coast in `fly_with_coast` happens at exactly `v0`, so
+    identical misses are plausible, not a copy-paste artifact.
 
 `planner.rs` — NEW 2026-09, THE SOLVER. Moved out of plan.rs at stage 3 as
 planned (it depends on orbits/vectors; plan.rs does not).
 - `PlanError` (thiserror): `Kepler(#[from])`, `Burn(#[from])` both
-  `#[error(transparent)]`, plus `NotConverged { time }` and
-  `InvalidAccel { accel }`. `#[from]` is what lets `?` convert.
+  `#[error(transparent)]`, plus `NotConverged { time }`,
+  `InvalidAccel { accel }` and `InvalidCenter { origin, target }` (both
+  `CentralBody`, Display via `{:?}`). `#[from]` is what lets `?` convert.
 - `Planner { origin: Orbit, target: Orbit }`, Copy.
+  `Planner::new(origin, target) -> Result<Self, PlanError>` (3a6a475)
+  rejects `origin.center != target.center` with `InvalidCenter`. Under
+  patched conics two objects around different bodies share no frame, so
+  this is a type-level refusal to plan nonsense, not a nicety.
   `fixed_accel(self, accel) -> Result<FlightPlan, PlanError>` rejects
   non-finite or `<= 0.0` accel (NOTE: zero is an ERROR here but VALID in
   `Burn::new`. That is consistent: a zero-accel burn is a harmless
@@ -891,12 +913,18 @@ planned (it depends on orbits/vectors; plan.rs does not).
   ends, with direction and `-direction`.
 - `solve_flight_time` is FIXED-POINT iteration, not Newton (the roadmap
   said "Newton flavour"): `t ← 2√(|target(t0+t) − origin|/a)`, 30-iter
-  cap, converged when successive t differ by ≤ 1 s. Fixed point converges
-  when the target's speed is small next to the ship's mean transit speed,
-  true for any torch ship; a very weak drive could fail to converge.
+  cap. Converged when successive TARGET POSITIONS differ by ≤ 1 m
+  (changed 3a6a475; it was successive t ≤ 1 s). Measuring convergence in
+  distance is measuring it in the unit the budget is in. `old_position`
+  starts at the target's current position, so a stationary target
+  converges on the first iteration. Fixed point converges when the
+  target's speed is small next to the ship's mean transit speed, true for
+  any torch ship; a very weak drive could fail to converge.
 - Subtlety: on convergence it returns `new_time` but aims at the target's
-  position at `guess_time`. The arrival miss is therefore bounded by
-  |Δt| × target speed ≈ 1 s × ~17 km/s ≈ 17 km, NOT by 0.
+  position at `guess_time`, so the arrival miss is not 0. With the
+  distance criterion it is bounded at roughly the 1 m tolerance (the
+  iteration is a contraction, so the next step moves less than the last);
+  under the old 1 s criterion it was ~17 km (1 s × target speed).
 - WHAT IT IGNORES (all measured 2026-09-25, Earth → Pallas at 2.943 m/s²,
   6.27 d, flown by `Ship::fly` with Sol gravity):
   - origin VELOCITY (reads only `current_state().position`): with Earth's
@@ -906,26 +934,31 @@ planned (it depends on orbits/vectors; plan.rs does not).
     not. Even from rest, the relative velocity at arrival is **22.4 km/s**.
     An intercept, not a rendezvous.
   - GRAVITY: origin at rest, Sol gravity only, miss **607,500 km**.
-  - centers: nothing checks `origin.center == target.center`.
-    `moving_target` mixes `None` (origin) with `Sol` (target), which is fine
-    for a test but meaningless under patched conics.
+  - centers: now CHECKED by `Planner::new` (see above).
   - `max_accel`: `accel` is a bare parameter, no `Ship` involved.
 - Tests (3): `invalid_accel` (zero/inf/neg/NaN, `let … else` payload
-  binding, matching the burns.rs pattern; its final
-  `assert!(a_nan.is_nan())` asserts the fixture, not the code, and can be
-  deleted, still present 2026-09-25). `stationary_target` (μ = 0,
-  rest-to-rest to near-origin, recorded miss 1.0911e-3 m. The tolerance
-  was 1.1e-3 (1.008× headroom, the knife-edge mistake again), then 2e-3,
-  and is now **5e-3, ~4.6×**. FIXED). `moving_target` (μ = 0 origin at rest → Pallas on
-  Sol rails, recorded miss 703 m, tolerance 2e3). The 2e3 is TIGHTER than
-  the ~17 km the solver's 1 s tolerance guarantees, so 703 m is a
-  convergence-luck value for this fixture; a different target or accel
-  can legally miss by 10 km and fail. Either derive the tolerance from
-  the solver's bound or tighten the solver's convergence criterion (in
-  DISTANCE, which is what the budget is in). STILL OPEN. Its assert
-  message also still says "initial and final position".
+  binding, matching the burns.rs pattern; the dead
+  `assert!(a_nan.is_nan())` that asserted the fixture is deleted).
+  `stationary_target` (μ = 0, rest-to-rest to near-origin, recorded miss
+  1.0911e-3 m, re-measured 2026-10-30. The tolerance was 1.1e-3 (1.008×
+  headroom, the knife-edge mistake again), then 2e-3, and is now **5e-3,
+  ~4.6×**). `moving_target` (μ = 0 origin at rest → a FLAT-SPACE Pallas,
+  tolerance 1.0 m, matching the solver's distance criterion).
+  - **`moving_target`'s target no longer rides Kepler rails.** Because
+    `Planner::new` rejects mismatched centres, the test now builds
+    Pallas's J2000 state from its elements on `MU_SOL` and wraps it in an
+    `Orbit` on `FlatSpace`, so the target moves in a STRAIGHT LINE at
+    Pallas's J2000 velocity. That is a correct flat-space oracle, but it
+    means NO planner test currently aims at a target on curved rails.
+    B2 (gravity shooting) is where that coverage comes back.
+  - Recorded-miss DISCREPANCY: the comment above the test says
+    0.002950791009326781, but forcing a failure in a scratch copy of
+    HEAD on 2026-10-30 printed **0.002278061065116802**. Either the
+    comment was recorded before a later edit in 3a6a475 or it was
+    copied from somewhere else. Re-measure and fix the comment. Both
+    are ~400× inside the 1.0 tolerance, so nothing is at risk.
 
-`test_fixtures.rs` — NEW 2026-09-25 (uncommitted at time of writing). The
+`test_fixtures.rs` — NEW 2026-09-25 (committed in d3e60e2). The
 ONE home for transcribed test setup, replacing copies in orbits.rs,
 vectors.rs, integrate.rs, planner.rs, plan.rs and ship.rs. Before the
 merge, all four EMB/Pallas copies were verified digit-for-digit identical,
@@ -938,7 +971,7 @@ so no test's numbers moved (46/46 green, same tolerances).
   the edge-case tests), `emb_orbit()`, `pallas_orbit()`,
   `stationary_emb()` (EMB's J2000 Horizons position, v = 0),
   `stationary_emb_orbit()` and `stationary_near_origin[_orbit]()` (both
-  on `CentralBody::None`), and `test_ship(state, center)` (fills name,
+  on `CentralBody::FlatSpace`), and `test_ship(state, center)` (fills name,
   clock = J2000, transponder, mass 1, max_accel 1000).
 - What stays OUT, per the test DRY rule: Horizons expected vectors,
   recorded misses, tolerances. Those remain literal in each test.
@@ -954,16 +987,17 @@ so no test's numbers moved (46/46 green, same tolerances).
   Horizons-accurate (~1,429 km/yr off, per the bodies.rs measurement). It
   cannot be fixed inside the fixture, see the `Orbit` μ limitation under
   roadmap F. Fine for its only use (a plausible planner target in
-  `invalid_accel`); never use it in a known-answer test. It deserves a
-  doc comment saying so. `pallas_orbit()` has no such issue: Pallas's
-  correct μ IS `MU_SOL`.
+  `invalid_accel`); never use it in a known-answer test. It now carries a
+  `// Not Horizons data - only for unit tests` comment (a plain `//`, not
+  a `///` doc comment; fine inside a cfg(test) module). `pallas_orbit()`
+  has no such issue: Pallas's correct μ IS `MU_SOL`.
 
 3D migration (branch adventure-to-the-third-dimension): COMPLETE.
 Checklist items 1–7 plus `Trajectory::from_state` in full 3D all done.
 
-fmt/clippy/tests all green as of 2026-09-25 (46 sim-core tests, working
-tree incl. the uncommitted fixtures refactor), full CI gate run (fmt +
-clippy --all-targets -D warnings + test --workspace).
+fmt/clippy/tests all green as of 2026-10-30 (47 sim-core tests at
+c74161e, clean tree), full CI gate run (fmt + clippy --all-targets
+-D warnings + test --workspace).
 
 Next up, in order (REORDERED 2026-08-08 — the burn integrator was moved
 ahead of the CLI). Rationale: the CLI's command surface is defined by what
@@ -1091,31 +1125,33 @@ before the surfaces that expose it. The new fact is that the planner works
 only in flat space from rest, so "plan a real trip" is not yet a sim-core
 capability, and a CLI built now would mostly display wrong answers.
 
-A. Harden what exists (small, do first, each one a failing test first):
-   A1. DONE 2026-09-25 (74c0b08): `Ship::fly` coast-gap bug fixed,
-       guarded by `fly_with_coast`.
-   A2. Fix the zero-velocity NaN in `Trajectory::from_state` and add a
-       `test_at_rest` (μ = Sol, v = 0 → PureRadial). OPEN.
-   A3. Invariants and hygiene. DEFERRED by decision: plan ordering
-       (to the UI/planner) and `max_accel` (to the UI, clamp semantics).
-       See ship.rs. STILL OPEN: Ship getters → delete
-       `#![allow(dead_code)]`, rename `CentralBody::None`, planner
-       rejects mismatched centers.
-   A4. Test hygiene. DONE: shared `test_fixtures.rs` module, `test_ship`
-       helper, `stationary_target` tolerance 5e-3. STILL OPEN:
-       `moving_target` tolerance vs the solver's ~17 km bound,
-       `one_d_brachistochrone` 1e-7 → 1e-4 + its messages, the stale
-       "initial and final" assert messages in ship.rs/planner.rs, the
-       dead `assert!(a_nan.is_nan())` in `invalid_accel`, and a doc
-       comment on `emb_orbit()` flagging Sun-only μ. Commit the fixtures
-       refactor.
+A. Harden what exists. COMPLETE 2026-09-25 (3a6a475).
+   A1. DONE (74c0b08): `Ship::fly` coast-gap bug fixed, guarded by
+       `fly_with_coast`.
+   A2. DONE (543d991): zero-velocity NaN in `Trajectory::from_state`
+       fixed, guarded by `test_at_rest`.
+   A3. DONE: Ship getters + `#![allow(dead_code)]` deleted (f4f0963),
+       `CentralBody::None` → `FlatSpace`, `Planner::new` rejects
+       mismatched centres. Still DEFERRED by decision: plan ordering (to
+       the UI/planner) and `max_accel` (to the UI, clamp semantics). See
+       ship.rs.
+   A4. DONE: `test_fixtures.rs` committed, `test_ship` helper,
+       `stationary_target` 5e-3, solver convergence in metres with
+       `moving_target` at 1.0 m, `one_d_brachistochrone` 1e-4, stale
+       messages fixed, dead `a_nan` assert deleted, `emb_orbit()`
+       comment. Crumbs left (all cosmetic): `moving_target`'s
+       recorded-miss comment disagrees with a re-measurement, and
+       `one_d_brachistochrone`'s messages have a typo and print the
+       displacement instead of the residual (see plan.rs/planner.rs).
 B. Make the planner physically real (the actual item-4 finish):
    B1. Boundary velocities: a moving origin (v0) AND matching the
        target's velocity at arrival (rendezvous, not intercept). Solve in
        flat space first so an exact oracle exists. With two fixed-heading
        legs the unknowns are 2 directions + 2 durations = 6, constrained
        by relative position + relative velocity = 6. This is the repo's
-       first multi-dimensional solve.
+       first multi-dimensional solve. NEXT UP as of 2026-10-30. In the
+       terms of `design/Planner-Modes.txt` it is the "match position and
+       velocity" pair of modes.
    B2. Gravity correction by SHOOTING: the closed-form plan is the first
        guess; fly it with `integrate` under real gravity, measure the miss
        vector, shift the aim point by the miss, re-plan, repeat until the
@@ -1123,8 +1159,10 @@ B. Make the planner physically real (the actual item-4 finish):
        code (the settled rule) while letting the integrator be the truth
        the planner converges on. Receipt to beat: 607,500 km.
    B3. Merge `planners-and-solvers` to master once B1 is green (the
-       branch is already 15+ commits and a long-lived branch is a
-       conflict magnet).
+       branch is 35 commits ahead as of 2026-10-30 and a long-lived
+       branch is a conflict magnet). Finished roadmap A is itself a
+       clean, green checkpoint, so merging BEFORE starting B1 is a
+       reasonable alternative.
 C. Ship as a game object: `advance_to(epoch)` that flies PART of a plan
    (a GM "advance 12 h" lands mid-burn), plan storage on the ship,
    decoupled fuel scalar ṁ = m·a/(g₀·Isp), serde derives on Ship.

@@ -99,8 +99,8 @@ impl Ship {
         self.name = name;
     }
 
-    pub fn current_state(&self) -> &StateVector {
-        &self.current_state
+    pub fn current_state(&self) -> StateVector {
+        self.current_state
     }
 
     pub fn center(&self) -> CentralBody {

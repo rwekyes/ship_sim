@@ -59,15 +59,15 @@ mod tests {
                 .sum::<DVec3>()
         });
         let velocity_diff = state.velocity.distance(final_state.velocity);
-        let position_diff = state.position.distance(final_state.position);
+        let position_diff = state.position.distance(final_state.position) - 7e8;
         assert!(
             velocity_diff.abs() <= 1.0e-4,
-            "Difference in final and predicted velocities {} is greater that tolerance of 1e-4",
+            "Difference in final and predicted velocities {} is greater than tolerance of 1e-4",
             velocity_diff
         );
         assert!(
-            (position_diff - 7e8).abs() <= 1e-4,
-            "Difference in final and predicted positions {} is greater that tolerance of 1e-4",
+            (position_diff).abs() <= 1e-4,
+            "Difference in final and predicted positions {} is greater than tolerance of 1e-4",
             position_diff
         );
     }

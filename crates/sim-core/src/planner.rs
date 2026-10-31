@@ -155,7 +155,7 @@ mod tests {
         );
     }
 
-    // Recorded miss: 0.002950791009326781
+    // Recorded miss: 0.002278061065116802
     #[test]
     fn moving_target() {
         let origin = stationary_emb_orbit();
