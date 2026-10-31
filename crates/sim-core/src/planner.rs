@@ -51,18 +51,18 @@ impl Planner {
         }
         let origin_state = self.origin.current_state()?;
         let origin_time = self.origin.epoch();
-        let (time, direction) =
+        let (time, heading) =
             solve_flight_time(self.target, origin_state.position, origin_time, accel)?;
-        let leg_time = time / 2.0;
-        let maneuvers = vec![
-            Maneuver::Burn(Burn::new(origin_time, leg_time, accel, direction)?),
-            Maneuver::Burn(Burn::new(
-                origin_time + leg_time.seconds(),
-                leg_time,
-                accel,
-                -direction,
-            )?),
-        ];
+        let duration = time / 2.0;
+        let maneuvers = maneuver_builder(
+            origin_time,
+            accel,
+            Leg { duration, heading },
+            Leg {
+                duration,
+                heading: -heading,
+            },
+        )?;
         Ok(FlightPlan::new(maneuvers))
     }
 }
@@ -91,6 +91,30 @@ fn solve_flight_time(
     }
 
     Err(PlanError::NotConverged { time: guess_time })
+}
+
+/// Helper struct, expandable for mismatched accel
+struct Leg {
+    duration: f64,
+    heading: DVec3,
+}
+
+/// Returns a vec of maneuvers for constant accel, given two legs
+fn maneuver_builder(
+    start: Epoch,
+    accel: f64,
+    leg1: Leg,
+    leg2: Leg,
+) -> Result<Vec<Maneuver>, PlanError> {
+    Ok(vec![
+        Maneuver::Burn(Burn::new(start, leg1.duration, accel, leg1.heading)?),
+        Maneuver::Burn(Burn::new(
+            start + leg1.duration.seconds(),
+            leg2.duration,
+            accel,
+            leg2.heading,
+        )?),
+    ])
 }
 
 #[cfg(test)]
